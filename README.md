@@ -1,6 +1,6 @@
-# 🌐 OpenMindMap — Proof of Concept
+# 🌐 Open Mind Map — Proof of Concept
 
-OpenMindMap est une première ébauche d’application de **mind mapping** collaborative. Ce proof of concept se concentre sur les briques essentielles pour manipuler visuellement une carte et structurer ses idées.
+Open Mind Map est une première ébauche d’application de **mind mapping** collaborative. Ce proof of concept se concentre sur les briques essentielles pour manipuler visuellement une carte et structurer ses idées.
 
 ## ✨ Fonctionnalités incluses
 
@@ -31,4 +31,4 @@ Puis ouvrez [http://localhost:5173](http://localhost:5173) pour découvrir l’i
 - Gestion avancée du contenu des nœuds (tags, dates, pièces jointes).
 - Export/import vers des formats standard (Markdown, OPML, JSON).
 
-Ce dépôt servira de base pour itérer vers une version complète d’OpenMindMap.
+Ce dépôt servira de base pour itérer vers une version complète d’Open Mind Map.

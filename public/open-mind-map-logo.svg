@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">Open Mind Map Logo</title>
+  <desc id="desc">Central idea node connected to surrounding thoughts in a gradient circle.</desc>
+  <defs>
+    <linearGradient id="coreGradient" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="orbitGradient" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="rgba(148, 163, 184, 0.35)" />
+      <stop offset="100%" stop-color="rgba(79, 70, 229, 0.4)" />
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="rgba(15, 23, 42, 0.25)" />
+    </filter>
+  </defs>
+  <rect width="96" height="96" rx="24" fill="#f8fafc" />
+  <g transform="translate(48 48)" stroke-linecap="round" stroke-linejoin="round">
+    <circle r="34" fill="url(#orbitGradient)" opacity="0.35" />
+    <g stroke="#1e293b" stroke-width="3.6" fill="none">
+      <path d="M 0 -18 L 0 -34" />
+      <path d="M -15 -6 L -30 -16" />
+      <path d="M 17 -2 L 30 -12" />
+      <path d="M 12 10 L 26 22" />
+      <path d="M -8 14 L -22 26" />
+    </g>
+    <g fill="#0f172a">
+      <circle cx="0" cy="-38" r="5" />
+      <circle cx="-34" cy="-20" r="6" />
+      <circle cx="34" cy="-14" r="6" />
+      <circle cx="32" cy="24" r="6" />
+      <circle cx="-26" cy="30" r="6" />
+    </g>
+    <g filter="url(#shadow)">
+      <circle r="18" fill="url(#coreGradient)" />
+      <circle r="18" fill="url(#coreGradient)" opacity="0.32" />
+      <circle r="10" fill="#ffffff" opacity="0.55" />
+    </g>
+  </g>
+</svg>
