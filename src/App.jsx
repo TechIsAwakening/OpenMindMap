@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { jsPDF } from 'jspdf'
 import './App.css'
 
 const LEVEL_SPACING = 220
@@ -917,7 +918,6 @@ function App() {
   const handleExportPdf = useCallback(async () => {
     if (typeof window === 'undefined') return
     try {
-      const { jsPDF } = await import('jspdf')
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' })
       const pageWidth = pdf.internal.pageSize.getWidth()
       const pageHeight = pdf.internal.pageSize.getHeight()
@@ -1099,9 +1099,9 @@ function App() {
         const nodeLink = normalizeExternalLink(typeof node.link === 'string' ? node.link : '')
         if (nodeLink) {
           const iconSize = 12 * scale
-          const iconPadding = 12 * scale
-          const iconX = nodeX + nodeWidth - iconPadding - iconSize
-          const iconY = nodeY + nodeHeight - iconPadding - iconSize
+          const iconGap = 16 * scale
+          const iconX = nodeX + nodeWidth - iconSize + iconGap
+          const iconY = nodeY + nodeHeight + iconGap
           const corner = iconSize * 0.35
           pdf.setFillColor(255, 255, 255)
           pdf.roundedRect(iconX, iconY, iconSize, iconSize, corner, corner, 'F')
@@ -1125,7 +1125,7 @@ function App() {
             iconX + iconSize - circleOffset + circleRadius * 0.2,
             iconY + iconSize - circleOffset - circleRadius * 0.8,
           )
-          pdf.link(iconX, iconY, iconSize, iconSize, { url: nodeLink })
+          pdf.link(iconX, iconY, iconSize, iconSize, { url: nodeLink, target: '_blank' })
           pdf.setDrawColor(0, 0, 0)
         }
       })
