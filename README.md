@@ -65,3 +65,14 @@ npm install
 
 # Lancer en mode dev
 npm run dev
+```
+
+## 🧾 Exporter la carte en PDF
+
+- Ouvrez l'application et assurez-vous que la carte mentale est visible dans le canvas.
+- Cliquez sur le bouton **« Exporter en PDF »** présent dans la barre supérieure.
+- Un indicateur de chargement s'affiche durant la génération ; en cas de succès, le fichier PDF est automatiquement téléchargé.
+- En cas d'erreur (par exemple contenu externe bloqué), un message d'avertissement détaille la marche à suivre.
+
+L'export repose sur `dom-to-image-more` pour convertir le `<svg class="mindmap-canvas">` en image raster puis sur `jspdf` pour composer et enregistrer le document PDF.
+
