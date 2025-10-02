@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const LEVEL_SPACING = 220
-const NODE_WIDTH = 220
-const NODE_HEIGHT = 88
+const MIN_NODE_WIDTH = 120
+const MIN_NODE_HEIGHT = 40
+const MAX_NODE_WIDTH = 420
 const GRID_SIZE = 40
+const PLACEHOLDER_LABEL = 'Nommez cette idée'
+const DEFAULT_NODE_SIZE = Object.freeze({ width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT })
 
 const INITIAL_NODES = [
   { id: 'root', label: 'Ma carte mentale', parentId: null },
@@ -117,6 +120,7 @@ function App() {
   const [customPositions, setCustomPositions] = useState({})
   const [draggingNodeId, setDraggingNodeId] = useState(null)
   const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(false)
+  const [nodeSizes, setNodeSizes] = useState({})
   const idCounter = useRef(nextIdFromInitial)
   const svgRef = useRef(null)
   const panStateRef = useRef({
@@ -135,6 +139,86 @@ function App() {
   const [isPanning, setIsPanning] = useState(false)
 
   const dragStateRef = useRef(null)
+  const measurementRef = useRef(null)
+
+  useLayoutEffect(() => {
+    if (typeof document === 'undefined') return
+
+    if (!measurementRef.current) {
+      const container = document.createElement('div')
+      container.style.position = 'absolute'
+      container.style.visibility = 'hidden'
+      container.style.pointerEvents = 'none'
+      container.style.top = '-9999px'
+      container.style.left = '-9999px'
+      container.style.padding = '18px 20px'
+      container.style.border = '3px solid transparent'
+      container.style.borderRadius = '24px'
+      container.style.fontWeight = '600'
+      container.style.fontSize = '1.05rem'
+      container.style.lineHeight = '1.3'
+      container.style.fontFamily = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+      container.style.display = 'flex'
+      container.style.alignItems = 'center'
+      container.style.justifyContent = 'center'
+      container.style.boxSizing = 'border-box'
+      container.style.whiteSpace = 'pre-wrap'
+      container.style.wordBreak = 'break-word'
+      container.style.textAlign = 'center'
+      container.style.maxWidth = `${MAX_NODE_WIDTH}px`
+
+      const labelEl = document.createElement('span')
+      labelEl.style.display = 'inline-block'
+      labelEl.style.padding = '0 4px'
+      labelEl.style.whiteSpace = 'pre-wrap'
+      labelEl.style.wordBreak = 'break-word'
+      container.appendChild(labelEl)
+
+      document.body.appendChild(container)
+      measurementRef.current = { container, labelEl }
+    }
+
+    const { container, labelEl } = measurementRef.current
+    const nextSizes = {}
+
+    nodes.forEach((node) => {
+      const trimmed = node.label.trim()
+      const text = trimmed.length > 0 ? node.label : ''
+      labelEl.textContent = text.length > 0 ? text : '\u00a0'
+      container.style.width = 'auto'
+      const measuredWidth = container.offsetWidth
+      const clampedWidth = Math.min(Math.max(measuredWidth, MIN_NODE_WIDTH), MAX_NODE_WIDTH)
+      container.style.width = `${clampedWidth}px`
+      const measuredHeight = container.offsetHeight
+      const clampedHeight = Math.max(measuredHeight, MIN_NODE_HEIGHT)
+      nextSizes[node.id] = { width: clampedWidth, height: clampedHeight }
+    })
+
+    setNodeSizes((prev) => {
+      const prevKeys = Object.keys(prev)
+      const nextKeys = Object.keys(nextSizes)
+      if (prevKeys.length !== nextKeys.length) {
+        return nextSizes
+      }
+      for (const key of nextKeys) {
+        const prevSize = prev[key]
+        const nextSize = nextSizes[key]
+        if (!prevSize || prevSize.width !== nextSize.width || prevSize.height !== nextSize.height) {
+          return nextSizes
+        }
+      }
+      return prev
+    })
+  }, [nodes])
+
+  useEffect(() => {
+    return () => {
+      if (measurementRef.current) {
+        measurementRef.current.container.remove()
+        measurementRef.current = null
+      }
+    }
+  }, [])
 
 
   const rootNode = useMemo(
@@ -176,7 +260,7 @@ function App() {
     } else {
       setDraftLabel('')
     }
-  }, [selectedNode?.id])
+  }, [selectedNode])
 
   const updateSelectedLabel = useCallback(
     (label) => {
@@ -275,7 +359,7 @@ function App() {
       setIsPanning(true)
       try {
         svg.setPointerCapture(event.pointerId)
-      } catch (error) {
+      } catch {
         // ignore capture errors
       }
     },
@@ -315,7 +399,7 @@ function App() {
     if (svg && panStateRef.current.pointerId !== null) {
       try {
         svg.releasePointerCapture(panStateRef.current.pointerId)
-      } catch (error) {
+      } catch {
         // ignore release errors
       }
     }
@@ -568,7 +652,9 @@ function App() {
                 if (!nodePos) return null
                 const isSelected = node.id === selectedNode?.id
                 const isRoot = node.id === rootNode?.id
-                const displayLabel = node.label.trim().length > 0 ? node.label : 'Nommez cette idée'
+                const displayLabel = node.label.trim().length > 0 ? node.label : PLACEHOLDER_LABEL
+                const size = nodeSizes[node.id] ?? DEFAULT_NODE_SIZE
+                const toolbarWidth = Math.max(size.width, 220)
 
                 return (
                   <g
@@ -587,9 +673,9 @@ function App() {
                   >
                     {isSelected && (
                       <foreignObject
-                        x={-110}
-                        y={-NODE_HEIGHT / 2 - 56}
-                        width={220}
+                        x={-toolbarWidth / 2}
+                        y={-size.height / 2 - 56}
+                        width={toolbarWidth}
                         height={48}
                         className="toolbar-wrapper"
                       >
@@ -612,10 +698,10 @@ function App() {
                     )}
 
                     <foreignObject
-                      x={-NODE_WIDTH / 2}
-                      y={-NODE_HEIGHT / 2}
-                      width={NODE_WIDTH}
-                      height={NODE_HEIGHT}
+                      x={-size.width / 2}
+                      y={-size.height / 2}
+                      width={size.width}
+                      height={size.height}
                     >
                       <div
                         className={`mindmap-node-card ${isSelected ? 'is-selected' : ''} ${isRoot ? 'is-root' : ''}`}
@@ -628,7 +714,7 @@ function App() {
                             data-no-drag="true"
                             autoFocus
                             value={draftLabel}
-                            placeholder="Nommez cette idée"
+                            placeholder={PLACEHOLDER_LABEL}
                             onChange={(event) => updateSelectedLabel(event.target.value)}
                             onClick={(event) => event.stopPropagation()}
                             onKeyDown={handleNodeKeyDown}
@@ -642,7 +728,7 @@ function App() {
                     </foreignObject>
 
                     {isSelected && (
-                      <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
+                      <foreignObject x={size.width / 2 + 12} y={-22} width={44} height={44}>
                         <div className="quick-add" data-pan-stop="true" xmlns="http://www.w3.org/1999/xhtml">
                           <button
                             type="button"
