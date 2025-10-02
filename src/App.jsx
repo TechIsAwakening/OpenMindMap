@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { jsPDF } from 'jspdf'
 import './App.css'
 
 const LEVEL_SPACING = 220
@@ -9,9 +10,9 @@ const PLACEHOLDER_LABEL = 'Nommez cette idée'
 const DEFAULT_NODE_SIZE = Object.freeze({ width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT })
 
 const INITIAL_NODES = [
-  { id: 'root', label: 'Open Mind Map', parentId: null },
-  { id: 'node-1', label: 'Idée clé #1', parentId: 'root' },
-  { id: 'node-2', label: 'Idée clé #2', parentId: 'root' },
+  { id: 'root', label: 'Open Mind Map', parentId: null, link: '' },
+  { id: 'node-1', label: 'Idée clé #1', parentId: 'root', link: '' },
+  { id: 'node-2', label: 'Idée clé #2', parentId: 'root', link: '' },
 ]
 
 const nextIdFromInitial =
@@ -30,6 +31,28 @@ function getNextIdFromNodes(nodes) {
       return Math.max(acc, Number.parseInt(match[1], 10))
     }, 0) + 1
   )
+}
+
+function normalizeExternalLink(value) {
+  if (typeof value !== 'string') {
+    return ''
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return ''
+  }
+  const hasScheme = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)
+  if (hasScheme) {
+    return trimmed
+  }
+  let sanitized = trimmed
+  while (sanitized.startsWith('/')) {
+    sanitized = sanitized.slice(1)
+  }
+  if (sanitized.length === 0) {
+    return ''
+  }
+  return `https://${sanitized}`
 }
 
 function getDefaultFilename(label, extension = 'json') {
@@ -158,10 +181,26 @@ function IconEdit() {
   )
 }
 
+function IconLink() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M7.5 12.5 12.5 7.5m-4-2h-2a3 3 0 0 0 0 6h1m5-6h1a3 3 0 0 1 0 6h-2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function App() {
   const [nodes, setNodes] = useState(INITIAL_NODES)
   const [selectedId, setSelectedId] = useState('root')
   const [draftLabel, setDraftLabel] = useState(INITIAL_NODES[0].label)
+  const [draftLink, setDraftLink] = useState(INITIAL_NODES[0].link ?? '')
   const [customPositions, setCustomPositions] = useState({})
   const [draggingNodeId, setDraggingNodeId] = useState(null)
   const [nodeSizes, setNodeSizes] = useState({})
@@ -198,7 +237,7 @@ function App() {
       container.style.pointerEvents = 'none'
       container.style.top = '-9999px'
       container.style.left = '-9999px'
-      container.style.padding = '18px 20px'
+      container.style.padding = '18px 52px 46px 24px'
       container.style.border = '3px solid transparent'
       container.style.borderRadius = '24px'
       container.style.fontWeight = '600'
@@ -304,20 +343,24 @@ function App() {
   useEffect(() => {
     if (selectedNode) {
       setDraftLabel(selectedNode.label)
+      setDraftLink(selectedNode.link ?? '')
     } else {
       setDraftLabel('')
+      setDraftLink('')
     }
   }, [selectedNode])
 
-  const applyNodeLabel = useCallback(
-    (label) => {
+  const applyNodeConfig = useCallback(
+    (label, link) => {
       if (!selectedNode) return
+      const normalizedLink = normalizeExternalLink(link)
       setNodes((prev) =>
         prev.map((node) =>
           node.id === selectedNode.id
             ? {
                 ...node,
                 label,
+                link: normalizedLink,
               }
             : node,
         ),
@@ -333,6 +376,7 @@ function App() {
       id: `node-${idCounter.current}`,
       label: '',
       parentId: selectedNode.id,
+      link: '',
     }
 
     idCounter.current += 1
@@ -365,6 +409,7 @@ function App() {
   const openConfigPanel = useCallback(() => {
     if (!selectedNode) return
     setDraftLabel(selectedNode.label)
+    setDraftLink(selectedNode.link ?? '')
     setIsConfigOpen(true)
   }, [selectedNode])
 
@@ -384,8 +429,11 @@ function App() {
 
       if (data.type === 'config-save') {
         const label = typeof data.payload?.label === 'string' ? data.payload.label : ''
+        const link = typeof data.payload?.link === 'string' ? data.payload.link : ''
+        const sanitizedLink = normalizeExternalLink(link)
         setDraftLabel(label)
-        applyNodeLabel(label)
+        setDraftLink(sanitizedLink)
+        applyNodeConfig(label, sanitizedLink)
         closeConfigPanel()
       }
 
@@ -398,10 +446,10 @@ function App() {
     return () => {
       window.removeEventListener('message', handleMessage)
     }
-  }, [applyNodeLabel, closeConfigPanel, isConfigOpen])
+  }, [applyNodeConfig, closeConfigPanel, isConfigOpen])
 
   const configIframeContent = useMemo(() => {
-    const initialData = { label: draftLabel ?? '' }
+    const initialData = { label: draftLabel ?? '', link: draftLink ?? '' }
 
     return `<!DOCTYPE html>
 <html lang="fr">
@@ -446,6 +494,11 @@ function App() {
         font-size: 0.95rem;
         color: rgba(15, 23, 42, 0.85);
       }
+      .config-hint {
+        margin: -8px 0 0 0;
+        color: rgba(15, 23, 42, 0.55);
+        font-size: 0.85rem;
+      }
       textarea {
         width: 100%;
         min-height: 180px;
@@ -459,6 +512,20 @@ function App() {
         box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
       }
       textarea:focus {
+        outline: 3px solid rgba(59, 130, 246, 0.35);
+        background: #ffffff;
+      }
+      input[type="url"] {
+        width: 100%;
+        border-radius: 18px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        padding: 12px 16px;
+        font: inherit;
+        color: inherit;
+        background: rgba(241, 245, 249, 0.6);
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+      }
+      input[type="url"]:focus {
         outline: 3px solid rgba(59, 130, 246, 0.35);
         background: #ffffff;
       }
@@ -503,6 +570,9 @@ function App() {
       </div>
       <label for="node-label">Contenu du nœud</label>
       <textarea id="node-label" placeholder="${PLACEHOLDER_LABEL}"></textarea>
+      <label for="node-link">Lien externe (URL)</label>
+      <input id="node-link" type="url" placeholder="https://exemple.com" spellcheck="false" />
+      <p class="config-hint">Laissez vide pour supprimer le lien.</p>
       <div class="config-actions">
         <button type="button" id="cancel">Annuler</button>
         <button type="button" id="save">Sauvegarder</button>
@@ -512,13 +582,31 @@ function App() {
       ;(function () {
         const initialData = ${JSON.stringify(initialData)}
         const textarea = document.getElementById('node-label')
+        const linkInput = document.getElementById('node-link')
         const send = (type, payload) => {
           parent.postMessage({ source: 'openmindmap-config', type, payload }, '*')
         }
         textarea.value = initialData.label || ''
         textarea.focus()
         textarea.setSelectionRange(textarea.value.length, textarea.value.length)
-        const handleSave = () => send('config-save', { label: textarea.value })
+        linkInput.value = initialData.link || ''
+        const normalizeLink = (value) => {
+          if (typeof value !== 'string') return ''
+          const trimmed = value.trim()
+          if (trimmed.length === 0) return ''
+          if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) return trimmed
+          let sanitized = trimmed
+          while (sanitized.startsWith('/')) {
+            sanitized = sanitized.slice(1)
+          }
+          if (sanitized.length === 0) return ''
+          return 'https://' + sanitized
+        }
+        const handleSave = () => {
+          const normalizedLink = normalizeLink(linkInput.value)
+          linkInput.value = normalizedLink
+          send('config-save', { label: textarea.value, link: normalizedLink })
+        }
         document.getElementById('cancel').addEventListener('click', () => send('config-cancel'))
         document.getElementById('save').addEventListener('click', handleSave)
         textarea.addEventListener('keydown', (event) => {
@@ -531,11 +619,21 @@ function App() {
             handleSave()
           }
         })
+        linkInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            send('config-cancel')
+          }
+          if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
+            event.preventDefault()
+            handleSave()
+          }
+        })
       })()
     </script>
   </body>
 </html>`
-  }, [draftLabel])
+  }, [draftLabel, draftLink])
 
   const handleCanvasClick = useCallback(() => {
     if (panStateRef.current.moved) {
@@ -820,7 +918,6 @@ function App() {
   const handleExportPdf = useCallback(async () => {
     if (typeof window === 'undefined') return
     try {
-      const { jsPDF } = await import('jspdf')
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' })
       const pageWidth = pdf.internal.pageSize.getWidth()
       const pageHeight = pdf.internal.pageSize.getHeight()
@@ -998,6 +1095,39 @@ function App() {
           pdf.text(line, centerX, startY, { align: 'center', baseline: 'middle' })
           startY += lineHeight
         })
+
+        const nodeLink = normalizeExternalLink(typeof node.link === 'string' ? node.link : '')
+        if (nodeLink) {
+          const iconSize = 12 * scale
+          const iconGap = 16 * scale
+          const iconX = nodeX + nodeWidth - iconSize + iconGap
+          const iconY = nodeY + nodeHeight + iconGap
+          const corner = iconSize * 0.35
+          pdf.setFillColor(255, 255, 255)
+          pdf.roundedRect(iconX, iconY, iconSize, iconSize, corner, corner, 'F')
+          pdf.setDrawColor(37, 99, 235)
+          const strokeWidth = Math.max(0.8 * scale, 0.6)
+          pdf.setLineWidth(strokeWidth)
+          pdf.roundedRect(iconX, iconY, iconSize, iconSize, corner, corner, 'S')
+          const circleRadius = iconSize * 0.22
+          const circleOffset = iconSize * 0.32
+          pdf.circle(iconX + circleOffset, iconY + circleOffset, circleRadius, 'S')
+          pdf.circle(iconX + iconSize - circleOffset, iconY + iconSize - circleOffset, circleRadius, 'S')
+          pdf.line(
+            iconX + circleOffset + circleRadius * 0.6,
+            iconY + circleOffset + circleRadius * 0.2,
+            iconX + iconSize - circleOffset - circleRadius * 0.6,
+            iconY + iconSize - circleOffset - circleRadius * 0.2,
+          )
+          pdf.line(
+            iconX + circleOffset - circleRadius * 0.2,
+            iconY + circleOffset + circleRadius * 0.8,
+            iconX + iconSize - circleOffset + circleRadius * 0.2,
+            iconY + iconSize - circleOffset - circleRadius * 0.8,
+          )
+          pdf.link(iconX, iconY, iconSize, iconSize, { url: nodeLink, target: '_blank' })
+          pdf.setDrawColor(0, 0, 0)
+        }
       })
 
       const filename = getDefaultFilename(rootNode?.label, 'pdf')
@@ -1032,7 +1162,10 @@ function App() {
             return
           }
 
-          const nextNodes = data.nodes.map((node) => ({ ...node }))
+          const nextNodes = data.nodes.map((node) => ({
+            ...node,
+            link: normalizeExternalLink(typeof node.link === 'string' ? node.link : ''),
+          }))
           const nextCustomPositions =
             data.customPositions && typeof data.customPositions === 'object'
               ? data.customPositions
@@ -1131,6 +1264,8 @@ function App() {
                 const displayLabel = node.label.trim().length > 0 ? node.label : PLACEHOLDER_LABEL
                 const size = nodeSizes[node.id] ?? DEFAULT_NODE_SIZE
                 const toolbarWidth = Math.max(size.width, 280)
+                const nodeLink = typeof node.link === 'string' ? node.link.trim() : ''
+                const hasLink = nodeLink.length > 0
 
                 return (
                   <g
@@ -1200,6 +1335,24 @@ function App() {
                         <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
                           {displayLabel}
                         </span>
+                        {hasLink && (
+                          <a
+                            href={nodeLink}
+                            className="node-link-icon"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-no-drag="true"
+                            aria-label="Ouvrir le lien externe"
+                            title="Ouvrir le lien externe"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setSelectedId(node.id)
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                          >
+                            <IconLink />
+                          </a>
+                        )}
                       </div>
                     </foreignObject>
 
