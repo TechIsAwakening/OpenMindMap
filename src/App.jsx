@@ -196,6 +196,90 @@ function App() {
   const [isPanning, setIsPanning] = useState(false)
 
   const dragStateRef = useRef(null)
+  const fileInputRef = useRef(null)
+
+  const applyImportedState = useCallback((rawState) => {
+    const providedNodes = Array.isArray(rawState?.nodes) ? rawState.nodes : []
+    const sanitizedNodes = providedNodes
+      .filter((node) => node && typeof node.id === 'string' && 'parentId' in node)
+      .map((node) => ({
+        id: node.id,
+        label: typeof node.label === 'string' ? node.label : '',
+        parentId:
+          node.parentId === null || typeof node.parentId === 'string' ? node.parentId : null,
+      }))
+    const nextNodes = sanitizedNodes.length > 0 ? sanitizedNodes : createDefaultNodes()
+
+    const root = nextNodes.find((node) => node.parentId === null) ?? nextNodes[0] ?? null
+    const requestedSelectedId =
+      typeof rawState?.selectedId === 'string' && nextNodes.some((node) => node.id === rawState.selectedId)
+        ? rawState.selectedId
+        : root?.id ?? null
+
+    const providedPositions = rawState?.customPositions
+    const nextCustomPositions =
+      providedPositions && typeof providedPositions === 'object' && !Array.isArray(providedPositions)
+        ? providedPositions
+        : {}
+
+    const providedView = rawState?.viewTransform
+    const nextViewTransform =
+      providedView && typeof providedView === 'object'
+        ? {
+            x: Number.isFinite(providedView.x) ? providedView.x : 0,
+            y: Number.isFinite(providedView.y) ? providedView.y : 0,
+            scale: Number.isFinite(providedView.scale) && providedView.scale > 0 ? providedView.scale : 1,
+          }
+        : { x: 0, y: 0, scale: 1 }
+
+    const nextIsGridSnappingEnabled = Boolean(rawState?.isGridSnappingEnabled)
+
+    const nextIdCounter = (() => {
+      const providedCounter = Number.isFinite(rawState?.idCounter) ? rawState.idCounter : null
+      const nextFromNodes = computeNextIdFromNodes(nextNodes)
+      if (providedCounter === null) return nextFromNodes
+      return Math.max(providedCounter, nextFromNodes)
+    })()
+
+    const persistedAt = (() => {
+      if (typeof rawState?.lastSavedAt === 'string') {
+        const parsed = new Date(rawState.lastSavedAt)
+        if (!Number.isNaN(parsed.getTime())) {
+          return rawState.lastSavedAt
+        }
+      }
+      return new Date().toISOString()
+    })()
+
+    setNodes(nextNodes)
+    const fallbackSelectedId = requestedSelectedId ?? root?.id ?? nextNodes[0]?.id ?? null
+    setSelectedId(fallbackSelectedId)
+    const selectedNodeFromImport = nextNodes.find((node) => node.id === fallbackSelectedId) ?? root
+    setDraftLabel(selectedNodeFromImport?.label ?? '')
+    setCustomPositions(nextCustomPositions)
+    setViewTransform(nextViewTransform)
+    setIsGridSnappingEnabled(nextIsGridSnappingEnabled)
+    setLastSavedAt(persistedAt)
+    idCounter.current = nextIdCounter
+
+    if (typeof window !== 'undefined') {
+      const payload = {
+        nodes: nextNodes,
+        customPositions: nextCustomPositions,
+        viewTransform: nextViewTransform,
+        isGridSnappingEnabled: nextIsGridSnappingEnabled,
+        selectedId: fallbackSelectedId,
+        idCounter: nextIdCounter,
+        lastSavedAt: persistedAt,
+      }
+
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+      } catch (error) {
+        console.error("Impossible d'enregistrer la sauvegarde importée", error)
+      }
+    }
+  }, [])
 
 
   const rootNode = useMemo(
@@ -308,6 +392,41 @@ function App() {
     setLastSavedAt(null)
     idCounter.current = computeNextIdFromNodes(freshNodes)
   }, [])
+
+  const handleTriggerFilePicker = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleImportFromFile = useCallback((event) => {
+    const input = event.target
+    const [file] = input.files ?? []
+    if (!file) {
+      // reset the input to allow selecting the same file again later
+      input.value = ''
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const text = reader.result
+        if (typeof text !== 'string') {
+          throw new Error('Le fichier est vide ou illisible')
+        }
+        const parsed = JSON.parse(text)
+        applyImportedState(parsed)
+      } catch (error) {
+        console.error('Impossible de charger le fichier de sauvegarde', error)
+      } finally {
+        input.value = ''
+      }
+    }
+    reader.onerror = () => {
+      console.error('Erreur lors de la lecture du fichier de sauvegarde', reader.error)
+      input.value = ''
+    }
+    reader.readAsText(file)
+  }, [applyImportedState])
 
   const formattedLastSavedAt = useMemo(() => {
     if (!lastSavedAt) return null
@@ -817,7 +936,7 @@ function App() {
           </g>
         </svg>
 
-        <div className="canvas-overlay">
+        <div className="canvas-overlay" data-pan-stop="true">
           <div className="overlay-panel">
             <label className="grid-toggle">
               <input
@@ -832,11 +951,26 @@ function App() {
                 <span aria-hidden="true">💾</span>
                 <span>Sauvegarder</span>
               </button>
+              <button
+                type="button"
+                className="overlay-button overlay-button--secondary"
+                onClick={handleTriggerFilePicker}
+              >
+                <span aria-hidden="true">📂</span>
+                <span>Charger</span>
+              </button>
               <button type="button" className="overlay-button overlay-button--danger" onClick={handleReset}>
                 <span aria-hidden="true">🗑️</span>
                 <span>Réinitialiser</span>
               </button>
             </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json"
+              onChange={handleImportFromFile}
+              style={{ display: 'none' }}
+            />
             <div className="autosave-info">
               {formattedLastSavedAt ? (
                 <span>Dernière sauvegarde : {formattedLastSavedAt}</span>

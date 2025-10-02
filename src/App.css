@@ -190,22 +190,24 @@
 
 .canvas-overlay {
   position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 24px;
+  left: 24px;
+  z-index: 2;
 }
 
 .overlay-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  align-items: center;
+  gap: 14px;
+  align-items: flex-start;
 }
 
 .overlay-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 .overlay-button {
@@ -245,6 +247,15 @@
 
 .overlay-button--primary:hover {
   background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+}
+
+.overlay-button--secondary {
+  background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+  color: white;
+}
+
+.overlay-button--secondary:hover {
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
 }
 
 .overlay-button--danger {
