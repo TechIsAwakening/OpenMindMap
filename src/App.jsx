@@ -4,6 +4,7 @@ import './App.css'
 const LEVEL_SPACING = 220
 const NODE_WIDTH = 220
 const NODE_HEIGHT = 88
+const GRID_SIZE = 40
 
 const INITIAL_NODES = [
   { id: 'root', label: 'Ma carte mentale', parentId: null },
@@ -113,7 +114,12 @@ function App() {
   const [nodes, setNodes] = useState(INITIAL_NODES)
   const [selectedId, setSelectedId] = useState('root')
   const [draftLabel, setDraftLabel] = useState(INITIAL_NODES[0].label)
+  const [customPositions, setCustomPositions] = useState({})
+  const [draggingNodeId, setDraggingNodeId] = useState(null)
+  const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(false)
   const idCounter = useRef(nextIdFromInitial)
+  const svgRef = useRef(null)
+  const dragStateRef = useRef(null)
 
   const rootNode = useMemo(
     () => nodes.find((node) => node.parentId === null) ?? null,
@@ -127,7 +133,22 @@ function App() {
     }
   }, [nodes, rootNode, selectedId])
 
-  const positions = useMemo(() => computeLayout(nodes), [nodes])
+  const layoutPositions = useMemo(() => computeLayout(nodes), [nodes])
+  const positions = useMemo(() => {
+    const merged = {}
+    nodes.forEach((node) => {
+      const layout = layoutPositions[node.id]
+      const custom = customPositions[node.id]
+      if (layout && custom) {
+        merged[node.id] = { ...layout, ...custom }
+      } else if (layout) {
+        merged[node.id] = layout
+      } else if (custom) {
+        merged[node.id] = custom
+      }
+    })
+    return merged
+  }, [customPositions, layoutPositions, nodes])
   const selectedNode = useMemo(() => {
     const node = nodes.find((item) => item.id === selectedId)
     return node ?? rootNode
@@ -179,6 +200,17 @@ function App() {
 
     const toDelete = getBranchToDelete(nodes, selectedNode.id)
     setNodes((prev) => prev.filter((node) => !toDelete.has(node.id)))
+    setCustomPositions((prev) => {
+      const next = { ...prev }
+      let changed = false
+      toDelete.forEach((id) => {
+        if (id in next) {
+          delete next[id]
+          changed = true
+        }
+      })
+      return changed ? next : prev
+    })
     if (rootNode) {
       setSelectedId(rootNode.id)
     }
@@ -204,10 +236,149 @@ function App() {
     [addChild, removeSelectedBranch],
   )
 
+  const convertPointerToSvgPoint = useCallback((event) => {
+    const svgElement = svgRef.current
+    if (!svgElement) return null
+    const point = svgElement.createSVGPoint()
+    point.x = event.clientX
+    point.y = event.clientY
+    const ctm = svgElement.getScreenCTM()
+    if (!ctm) return null
+    const transformed = point.matrixTransform(ctm.inverse())
+    return { x: transformed.x, y: transformed.y }
+  }, [])
+
+  const snapPosition = useCallback(
+    (x, y) => {
+      if (!isGridSnappingEnabled) {
+        return { x, y }
+      }
+      const snappedX = Math.round(x / GRID_SIZE) * GRID_SIZE
+      const snappedY = Math.round(y / GRID_SIZE) * GRID_SIZE
+      return { x: snappedX, y: snappedY }
+    },
+    [isGridSnappingEnabled],
+  )
+
+  const handleNodePointerDown = useCallback(
+    (event, node) => {
+      event.stopPropagation()
+      if (event.button !== 0) return
+      setSelectedId(node.id)
+
+      if (node.id === rootNode?.id) {
+        return
+      }
+
+      if (event.target instanceof Element && event.target.closest('[data-no-drag="true"]')) {
+        return
+      }
+
+      const nodePosition = positions[node.id]
+      if (!nodePosition) return
+      const svgPoint = convertPointerToSvgPoint(event)
+      if (!svgPoint) return
+
+      dragStateRef.current = {
+        nodeId: node.id,
+        pointerId: event.pointerId,
+        startPointer: svgPoint,
+        startPosition: { x: nodePosition.x, y: nodePosition.y },
+      }
+
+      setDraggingNodeId(node.id)
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      event.preventDefault()
+    },
+    [convertPointerToSvgPoint, positions, rootNode],
+  )
+
+  const handleNodePointerMove = useCallback(
+    (event) => {
+      const dragState = dragStateRef.current
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return
+      }
+
+      const svgPoint = convertPointerToSvgPoint(event)
+      if (!svgPoint) return
+
+      event.stopPropagation()
+      event.preventDefault()
+
+      const deltaX = svgPoint.x - dragState.startPointer.x
+      const deltaY = svgPoint.y - dragState.startPointer.y
+      const nextPosition = snapPosition(
+        dragState.startPosition.x + deltaX,
+        dragState.startPosition.y + deltaY,
+      )
+
+      setCustomPositions((prev) => {
+        const previous = prev[dragState.nodeId]
+        if (previous && previous.x === nextPosition.x && previous.y === nextPosition.y) {
+          return prev
+        }
+        return {
+          ...prev,
+          [dragState.nodeId]: nextPosition,
+        }
+      })
+    },
+    [convertPointerToSvgPoint, snapPosition],
+  )
+
+  const endDragging = useCallback(() => {
+    dragStateRef.current = null
+    setDraggingNodeId(null)
+  }, [])
+
+  const handleNodePointerUp = useCallback(
+    (event) => {
+      const dragState = dragStateRef.current
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return
+      }
+
+      event.stopPropagation()
+      event.preventDefault()
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+      endDragging()
+    },
+    [endDragging],
+  )
+
+  const handleNodePointerCancel = useCallback(
+    (event) => {
+      const dragState = dragStateRef.current
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return
+      }
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+      endDragging()
+    },
+    [endDragging],
+  )
+
+  useEffect(() => {
+    setCustomPositions((prev) => {
+      const validIds = new Set(nodes.map((node) => node.id))
+      let changed = false
+      const next = {}
+      Object.entries(prev).forEach(([id, value]) => {
+        if (validIds.has(id)) {
+          next[id] = value
+        } else {
+          changed = true
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [nodes])
+
   return (
     <div className="app">
-      <div className="canvas-wrapper" onClick={handleCanvasClick}>
-        <svg className="mindmap-canvas" viewBox="-720 -480 1440 960">
+      <div className={`canvas-wrapper ${isGridSnappingEnabled ? 'with-grid' : ''}`} onClick={handleCanvasClick}>
+        <svg ref={svgRef} className="mindmap-canvas" viewBox="-720 -480 1440 960">
           <defs>
             <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="14" stdDeviation="14" floodColor="rgba(15, 23, 42, 0.22)" />
@@ -244,7 +415,11 @@ function App() {
               <g
                 key={node.id}
                 transform={`translate(${nodePos.x}, ${nodePos.y})`}
-                className="mindmap-node"
+                className={`mindmap-node ${draggingNodeId === node.id ? 'is-dragging' : ''}`}
+                onPointerDown={(event) => handleNodePointerDown(event, node)}
+                onPointerMove={handleNodePointerMove}
+                onPointerUp={handleNodePointerUp}
+                onPointerCancel={handleNodePointerCancel}
                 onClick={(event) => {
                   event.stopPropagation()
                   setSelectedId(node.id)
@@ -262,6 +437,7 @@ function App() {
                       <button
                         type="button"
                         className="toolbar-button"
+                        data-no-drag="true"
                         disabled={isRoot}
                         onClick={(event) => {
                           event.stopPropagation()
@@ -283,6 +459,7 @@ function App() {
                     {isSelected ? (
                       <input
                         className="node-input"
+                        data-no-drag="true"
                         autoFocus
                         value={draftLabel}
                         placeholder="Nommez cette idée"
@@ -304,6 +481,7 @@ function App() {
                       <button
                         type="button"
                         className="quick-add-button"
+                        data-no-drag="true"
                         onClick={(event) => {
                           event.stopPropagation()
                           addChild()
@@ -320,7 +498,19 @@ function App() {
         </svg>
 
         <div className="canvas-overlay">
-          <div className="overlay-tip">Cliquez sur la carte pour sélectionner un nœud. Ctrl + Retour arrière pour supprimer.</div>
+          <div className="overlay-panel">
+            <label className="grid-toggle">
+              <input
+                type="checkbox"
+                checked={isGridSnappingEnabled}
+                onChange={(event) => setIsGridSnappingEnabled(event.target.checked)}
+              />
+              <span>Aligner sur la grille</span>
+            </label>
+            <div className="overlay-tip">
+              Cliquez sur un nœud pour le sélectionner, glissez-déposez pour le déplacer. Ctrl + Retour arrière pour supprimer.
+            </div>
+          </div>
         </div>
       </div>
     </div>
