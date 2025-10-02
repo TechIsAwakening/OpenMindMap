@@ -1098,14 +1098,14 @@ function App() {
 
         const nodeLink = normalizeExternalLink(typeof node.link === 'string' ? node.link : '')
         if (nodeLink) {
-          const iconSize = 12 * scale
-          const iconGap = 16 * scale
+          const iconSize = 16 * scale
+          const iconGap = 20 * scale
           const iconX = nodeX + nodeWidth - iconSize + iconGap
           const iconY = nodeY + nodeHeight + iconGap
           const corner = iconSize * 0.35
           pdf.setFillColor(255, 255, 255)
           pdf.roundedRect(iconX, iconY, iconSize, iconSize, corner, corner, 'F')
-          pdf.setDrawColor(37, 99, 235)
+          pdf.setDrawColor(15, 23, 42)
           const strokeWidth = Math.max(0.8 * scale, 0.6)
           pdf.setLineWidth(strokeWidth)
           pdf.roundedRect(iconX, iconY, iconSize, iconSize, corner, corner, 'S')
