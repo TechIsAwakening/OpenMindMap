@@ -32,14 +32,14 @@ function getNextIdFromNodes(nodes) {
   )
 }
 
-function getDefaultFilename(label) {
+function getDefaultFilename(label, extension = 'json') {
   const fallback = 'mindmap'
   if (!label || typeof label !== 'string') {
-    return `${fallback}.json`
+    return `${fallback}.${extension}`
   }
   const trimmed = label.trim()
   if (trimmed.length === 0) {
-    return `${fallback}.json`
+    return `${fallback}.${extension}`
   }
   const normalized = trimmed
     .normalize('NFD')
@@ -49,7 +49,7 @@ function getDefaultFilename(label) {
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '')
   const safeName = normalized.length > 0 ? normalized : fallback
-  return `${safeName}.json`
+  return `${safeName}.${extension}`
 }
 
 function computeLayout(nodes) {
@@ -640,6 +640,197 @@ function App() {
     URL.revokeObjectURL(url)
   }, [customPositions, nodes, rootNode?.label, viewTransform])
 
+  const handleExportPdf = useCallback(async () => {
+    if (typeof window === 'undefined') return
+    try {
+      const { jsPDF } = await import('jspdf')
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' })
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const margin = 20
+
+      if (typeof document !== 'undefined') {
+        const backgroundCanvas = document.createElement('canvas')
+        const referenceWidth = 2048
+        backgroundCanvas.width = referenceWidth
+        backgroundCanvas.height = Math.round(referenceWidth * (pageHeight / pageWidth))
+        const ctx = backgroundCanvas.getContext('2d')
+
+        if (ctx) {
+          const { width, height } = backgroundCanvas
+
+          ctx.fillStyle = '#f8fafc'
+          ctx.fillRect(0, 0, width, height)
+
+          const baseGradient = ctx.createRadialGradient(
+            width / 2,
+            height * 0.1,
+            width * 0.1,
+            width / 2,
+            height / 2,
+            Math.max(width, height),
+          )
+          baseGradient.addColorStop(0, '#f8fafc')
+          baseGradient.addColorStop(1, '#e2e8f0')
+          ctx.fillStyle = baseGradient
+          ctx.fillRect(0, 0, width, height)
+
+          const overlayGradient = ctx.createRadialGradient(
+            width / 2,
+            height / 2,
+            width * 0.1,
+            width / 2,
+            height / 2,
+            Math.max(width, height) * 0.75,
+          )
+          overlayGradient.addColorStop(0, 'rgba(148, 163, 184, 0.18)')
+          overlayGradient.addColorStop(1, 'rgba(148, 163, 184, 0.05)')
+          ctx.fillStyle = overlayGradient
+          ctx.fillRect(0, 0, width, height)
+
+          const backgroundDataUrl = backgroundCanvas.toDataURL('image/png')
+          pdf.addImage(backgroundDataUrl, 'PNG', 0, 0, pageWidth, pageHeight)
+        } else {
+          pdf.setFillColor(248, 250, 252)
+          pdf.rect(0, 0, pageWidth, pageHeight, 'F')
+        }
+      } else {
+        pdf.setFillColor(248, 250, 252)
+        pdf.rect(0, 0, pageWidth, pageHeight, 'F')
+      }
+
+      const nodesWithPosition = nodes
+        .map((node) => {
+          const position = positions[node.id]
+          if (!position) return null
+          const size = nodeSizes[node.id] ?? DEFAULT_NODE_SIZE
+          return { node, position, size }
+        })
+        .filter(Boolean)
+
+      if (nodesWithPosition.length === 0) {
+        window.alert('Aucun contenu à exporter pour le PDF.')
+        return
+      }
+
+      let minX = Infinity
+      let maxX = -Infinity
+      let minY = Infinity
+      let maxY = -Infinity
+
+      nodesWithPosition.forEach(({ position, size }) => {
+        const halfWidth = size.width / 2
+        const halfHeight = size.height / 2
+        minX = Math.min(minX, position.x - halfWidth)
+        maxX = Math.max(maxX, position.x + halfWidth)
+        minY = Math.min(minY, position.y - halfHeight)
+        maxY = Math.max(maxY, position.y + halfHeight)
+      })
+
+      nodes.forEach((node) => {
+        if (node.parentId === null) return
+        const parentPosition = positions[node.parentId]
+        const nodePosition = positions[node.id]
+        if (!parentPosition || !nodePosition) return
+        minX = Math.min(minX, parentPosition.x, nodePosition.x)
+        maxX = Math.max(maxX, parentPosition.x, nodePosition.x)
+        minY = Math.min(minY, parentPosition.y, nodePosition.y)
+        maxY = Math.max(maxY, parentPosition.y, nodePosition.y)
+      })
+
+      if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+        window.alert('Impossible de déterminer la zone à exporter.')
+        return
+      }
+
+      const contentWidth = Math.max(maxX - minX, 1)
+      const contentHeight = Math.max(maxY - minY, 1)
+
+      const availableWidth = pageWidth - margin * 2
+      const availableHeight = pageHeight - margin * 2
+      const scale = Math.min(availableWidth / contentWidth, availableHeight / contentHeight)
+
+      const contentWidthScaled = contentWidth * scale
+      const contentHeightScaled = contentHeight * scale
+      const offsetX = margin + (availableWidth - contentWidthScaled) / 2
+      const offsetY = margin + (availableHeight - contentHeightScaled) / 2
+
+      const convertX = (value) => offsetX + (value - minX) * scale
+      const convertY = (value) => offsetY + (value - minY) * scale
+
+      pdf.setLineJoin('round')
+      pdf.setLineCap('round')
+      pdf.setDrawColor(15, 23, 42)
+
+      const connectionWidth = 3 * scale
+      pdf.setLineWidth(connectionWidth)
+      nodes.forEach((node) => {
+        if (node.parentId === null) return
+        const parentPosition = positions[node.parentId]
+        const nodePosition = positions[node.id]
+        if (!parentPosition || !nodePosition) return
+        pdf.line(convertX(parentPosition.x), convertY(parentPosition.y), convertX(nodePosition.x), convertY(nodePosition.y))
+      })
+
+      const PT_PER_MM = 72 / 25.4
+      const baseFontSizePx = 16.8
+      const lineHeightFactor = 1.3
+
+      nodesWithPosition.forEach(({ node, position, size }) => {
+        const nodeWidth = size.width * scale
+        const nodeHeight = size.height * scale
+        const nodeX = convertX(position.x - size.width / 2)
+        const nodeY = convertY(position.y - size.height / 2)
+        const cornerRadius = 24 * scale
+
+        const shadowOffset = 12 * scale
+        if (typeof pdf.GState === 'function') {
+          const shadowState = pdf.GState({ opacity: 0.18 })
+          pdf.setGState(shadowState)
+          pdf.setFillColor(15, 23, 42)
+          pdf.roundedRect(nodeX + shadowOffset, nodeY + shadowOffset, nodeWidth, nodeHeight, cornerRadius, cornerRadius, 'F')
+          pdf.setGState(pdf.GState({ opacity: 1 }))
+        }
+
+        pdf.setFillColor(255, 255, 255)
+        pdf.setDrawColor(0, 0, 0)
+        pdf.setLineWidth(5 * scale)
+        pdf.roundedRect(nodeX, nodeY, nodeWidth, nodeHeight, cornerRadius, cornerRadius, 'FD')
+
+        const paddingX = 20 * scale
+        const textAreaWidth = Math.max(nodeWidth - paddingX * 2, 0)
+        const centerX = nodeX + nodeWidth / 2
+        const centerY = nodeY + nodeHeight / 2
+
+        const label = node.label.trim().length > 0 ? node.label : PLACEHOLDER_LABEL
+        const fontSizePt = Math.max(baseFontSizePx * scale * PT_PER_MM, 6)
+        pdf.setFont('helvetica', 'bold')
+        const isPlaceholder = label === PLACEHOLDER_LABEL && node.label.trim().length === 0
+        if (isPlaceholder) {
+          pdf.setTextColor(94, 110, 135)
+        } else {
+          pdf.setTextColor(15, 23, 42)
+        }
+        pdf.setFontSize(fontSizePt)
+        const lines = pdf.splitTextToSize(label, textAreaWidth)
+        const lineHeight = (baseFontSizePx * lineHeightFactor * scale)
+        const totalHeight = lineHeight * lines.length
+        let startY = centerY - totalHeight / 2 + lineHeight / 2
+
+        lines.forEach((line) => {
+          pdf.text(line, centerX, startY, { align: 'center', baseline: 'middle' })
+          startY += lineHeight
+        })
+      })
+
+      const filename = getDefaultFilename(rootNode?.label, 'pdf')
+      pdf.save(filename)
+    } catch (error) {
+      console.error('Failed to export PDF', error)
+      window.alert("L'export PDF a échoué. Veuillez réessayer.")
+    }
+  }, [nodeSizes, nodes, positions, rootNode?.label])
+
   const handleLoadClick = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
@@ -867,6 +1058,9 @@ function App() {
               </button>
               <button type="button" className="overlay-button" onClick={handleLoadClick} data-pan-stop="true">
                 Charger
+              </button>
+              <button type="button" className="overlay-button" onClick={handleExportPdf} data-pan-stop="true">
+                Exporter en pdf
               </button>
               <input
                 ref={fileInputRef}
