@@ -17,6 +17,18 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
+.canvas-wrapper.with-grid::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.12) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 .mindmap-canvas {
   width: 100%;
   height: 100%;
@@ -31,8 +43,17 @@
 }
 
 .mindmap-node {
-  cursor: pointer;
+  cursor: grab;
   transition: transform 0.2s ease;
+  touch-action: none;
+}
+
+.mindmap-node.is-dragging {
+  cursor: grabbing;
+}
+
+.mindmap-node.is-dragging .mindmap-node-card {
+  transition: none;
 }
 
 .mindmap-node-card {
@@ -166,6 +187,35 @@
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
+}
+
+.overlay-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.grid-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.78);
+  color: white;
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+  cursor: pointer;
+  user-select: none;
+}
+
+.grid-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #38bdf8;
 }
 
 .overlay-tip {
