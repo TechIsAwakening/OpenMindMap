@@ -119,7 +119,23 @@ function App() {
   const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(false)
   const idCounter = useRef(nextIdFromInitial)
   const svgRef = useRef(null)
+  const panStateRef = useRef({
+    isPanning: false,
+    pointerId: null,
+    last: { x: 0, y: 0 },
+    moved: false,
+  })
+
+  const [viewTransform, setViewTransform] = useState({
+    x: 0,
+    y: 0,
+    scale: 1,
+  })
+
+  const [isPanning, setIsPanning] = useState(false)
+
   const dragStateRef = useRef(null)
+
 
   const rootNode = useMemo(
     () => nodes.find((node) => node.parentId === null) ?? null,
@@ -217,10 +233,138 @@ function App() {
   }, [nodes, rootNode, selectedNode])
 
   const handleCanvasClick = useCallback(() => {
+    if (panStateRef.current.moved) {
+      panStateRef.current.moved = false
+      return
+    }
     if (rootNode) {
       setSelectedId(rootNode.id)
     }
   }, [rootNode])
+
+  const getSvgPoint = useCallback((clientX, clientY) => {
+    const svg = svgRef.current
+    if (!svg) {
+      return { x: clientX, y: clientY }
+    }
+    const rect = svg.getBoundingClientRect()
+    const viewBox = svg.viewBox.baseVal
+    const x = ((clientX - rect.left) / rect.width) * viewBox.width + viewBox.x
+    const y = ((clientY - rect.top) / rect.height) * viewBox.height + viewBox.y
+    return { x, y }
+  }, [])
+
+  const handlePointerDown = useCallback(
+    (event) => {
+      if (event.button !== 0) return
+
+      const targetElement = event.target
+      if (targetElement instanceof Element && targetElement.closest('[data-pan-stop="true"]')) {
+        return
+      }
+
+      event.preventDefault()
+
+      const svg = svgRef.current
+      if (!svg) return
+
+      panStateRef.current.isPanning = true
+      panStateRef.current.pointerId = event.pointerId
+      panStateRef.current.last = { x: event.clientX, y: event.clientY }
+      panStateRef.current.moved = false
+      setIsPanning(true)
+      try {
+        svg.setPointerCapture(event.pointerId)
+      } catch (error) {
+        // ignore capture errors
+      }
+    },
+    [],
+  )
+
+  const handlePointerMove = useCallback(
+    (event) => {
+      if (!panStateRef.current.isPanning) return
+
+      const svg = svgRef.current
+      if (!svg) return
+
+      const dx = event.clientX - panStateRef.current.last.x
+      const dy = event.clientY - panStateRef.current.last.y
+      if (dx === 0 && dy === 0) return
+
+      const rect = svg.getBoundingClientRect()
+      const viewBox = svg.viewBox.baseVal
+      const scaleX = viewBox.width / rect.width
+      const scaleY = viewBox.height / rect.height
+
+      setViewTransform((prev) => ({
+        x: prev.x + dx * scaleX,
+        y: prev.y + dy * scaleY,
+        scale: prev.scale,
+      }))
+
+      panStateRef.current.last = { x: event.clientX, y: event.clientY }
+      panStateRef.current.moved = true
+    },
+    [],
+  )
+
+  const endPan = useCallback(() => {
+    const svg = svgRef.current
+    if (svg && panStateRef.current.pointerId !== null) {
+      try {
+        svg.releasePointerCapture(panStateRef.current.pointerId)
+      } catch (error) {
+        // ignore release errors
+      }
+    }
+    panStateRef.current.isPanning = false
+    panStateRef.current.pointerId = null
+    panStateRef.current.last = { x: 0, y: 0 }
+    setIsPanning(false)
+  }, [])
+
+  const handlePointerUp = useCallback(
+    (event) => {
+      if (!panStateRef.current.isPanning || event.pointerId !== panStateRef.current.pointerId) return
+      endPan()
+    },
+    [endPan],
+  )
+
+  const handlePointerLeave = useCallback(() => {
+    if (!panStateRef.current.isPanning) return
+    endPan()
+  }, [endPan])
+
+  const handleWheel = useCallback(
+    (event) => {
+      const svg = svgRef.current
+      if (!svg) return
+
+      event.preventDefault()
+
+      const point = getSvgPoint(event.clientX, event.clientY)
+
+      setViewTransform((prev) => {
+        const zoomIntensity = 0.0015
+        const wheel = event.deltaY
+        const scaleFactor = Math.exp(-wheel * zoomIntensity)
+        const newScale = Math.min(Math.max(prev.scale * scaleFactor, 0.35), 3)
+
+        const contentX = (point.x - prev.x) / prev.scale
+        const contentY = (point.y - prev.y) / prev.scale
+
+        return {
+          scale: newScale,
+          x: point.x - contentX * newScale,
+          y: point.y - contentY * newScale,
+        }
+      })
+    },
+    [getSvgPoint],
+  )
 
   const handleNodeKeyDown = useCallback(
     (event) => {
@@ -377,124 +521,189 @@ function App() {
 
   return (
     <div className="app">
-      <div className={`canvas-wrapper ${isGridSnappingEnabled ? 'with-grid' : ''}`} onClick={handleCanvasClick}>
-        <svg ref={svgRef} className="mindmap-canvas" viewBox="-720 -480 1440 960">
+      <div
+        className={`canvas-wrapper ${isGridSnappingEnabled ? 'with-grid' : ''}`}
+        onClick={handleCanvasClick}
+      >
+        <svg
+          ref={svgRef}
+          className={`mindmap-canvas ${isPanning ? 'is-panning' : ''}`}
+          viewBox="-720 -480 1440 960"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerLeave}
+          onPointerCancel={handlePointerLeave}
+          onWheel={handleWheel}
+        >
+
           <defs>
             <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="14" stdDeviation="14" floodColor="rgba(15, 23, 42, 0.22)" />
             </filter>
           </defs>
+          <g transform={`translate(${viewTransform.x} ${viewTransform.y})`}>
+            <g transform={`scale(${viewTransform.scale})`}>
+              {nodes
+                .filter((node) => node.parentId !== null)
+                .map((node) => {
+                  const parentPos = node.parentId ? positions[node.parentId] : null
+                  const nodePos = positions[node.id]
+                  if (!parentPos || !nodePos) return null
 
-          {nodes
-            .filter((node) => node.parentId !== null)
-            .map((node) => {
-              const parentPos = node.parentId ? positions[node.parentId] : null
-              const nodePos = positions[node.id]
-              if (!parentPos || !nodePos) return null
+                  return (
+                    <line
+                      key={`line-${node.id}`}
+                      x1={parentPos.x}
+                      y1={parentPos.y}
+                      x2={nodePos.x}
+                      y2={nodePos.y}
+                      className="mindmap-connection"
+                    />
+                  )
+                })}
 
-              return (
-                <line
-                  key={`line-${node.id}`}
-                  x1={parentPos.x}
-                  y1={parentPos.y}
-                  x2={nodePos.x}
-                  y2={nodePos.y}
-                  className="mindmap-connection"
-                />
-              )
-            })}
+              {nodes.map((node) => {
+                const nodePos = positions[node.id]
+                if (!nodePos) return null
+                const isSelected = node.id === selectedNode?.id
+                const isRoot = node.id === rootNode?.id
+                const displayLabel = node.label.trim().length > 0 ? node.label : 'Nommez cette idée'
 
-          {nodes.map((node) => {
-            const nodePos = positions[node.id]
-            if (!nodePos) return null
-            const isSelected = node.id === selectedNode?.id
-            const isRoot = node.id === rootNode?.id
-            const displayLabel = node.label.trim().length > 0 ? node.label : 'Nommez cette idée'
-
-            return (
-              <g
-                key={node.id}
-                transform={`translate(${nodePos.x}, ${nodePos.y})`}
-                className={`mindmap-node ${draggingNodeId === node.id ? 'is-dragging' : ''}`}
-                onPointerDown={(event) => handleNodePointerDown(event, node)}
-                onPointerMove={handleNodePointerMove}
-                onPointerUp={handleNodePointerUp}
-                onPointerCancel={handleNodePointerCancel}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setSelectedId(node.id)
-                }}
-              >
-                {isSelected && (
-                  <foreignObject
-                    x={-110}
-                    y={-NODE_HEIGHT / 2 - 56}
-                    width={220}
-                    height={48}
-                    className="toolbar-wrapper"
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${nodePos.x}, ${nodePos.y})`}
+                    className={`mindmap-node ${draggingNodeId === node.id ? 'is-dragging' : ''}`}
+                    data-pan-stop="true"
+                    onPointerDown={(event) => handleNodePointerDown(event, node)}
+                    onPointerMove={handleNodePointerMove}
+                    onPointerUp={handleNodePointerUp}
+                    onPointerCancel={handleNodePointerCancel}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setSelectedId(node.id)
+                    }}
                   >
-                    <div className="floating-toolbar" xmlns="http://www.w3.org/1999/xhtml">
-                      <button
-                        type="button"
-                        className="toolbar-button"
-                        data-no-drag="true"
-                        disabled={isRoot}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          removeSelectedBranch()
-                        }}
+                    {isSelected && (
+                      <foreignObject
+                        x={-110}
+                        y={-NODE_HEIGHT / 2 - 56}
+                        width={220}
+                        height={48}
+                        className="toolbar-wrapper"
                       >
-                        <IconTrash />
-                        <span>Supprimer</span>
-                      </button>
-                    </div>
-                  </foreignObject>
-                )}
-
-                <foreignObject x={-NODE_WIDTH / 2} y={-NODE_HEIGHT / 2} width={NODE_WIDTH} height={NODE_HEIGHT}>
-                  <div
-                    className={`mindmap-node-card ${isSelected ? 'is-selected' : ''} ${isRoot ? 'is-root' : ''}`}
-                    xmlns="http://www.w3.org/1999/xhtml"
-                  >
-                    {isSelected ? (
-                      <input
-                        className="node-input"
-                        data-no-drag="true"
-                        autoFocus
-                        value={draftLabel}
-                        placeholder="Nommez cette idée"
-                        onChange={(event) => updateSelectedLabel(event.target.value)}
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={handleNodeKeyDown}
-                      />
-                    ) : (
-                      <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
-                        {displayLabel}
-                      </span>
+                        <div className="floating-toolbar" data-pan-stop="true" xmlns="http://www.w3.org/1999/xhtml">
+                          <button
+                            type="button"
+                            className="toolbar-button"
+                            data-no-drag="true"
+                            disabled={isRoot}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              removeSelectedBranch()
+                            }}
+                          >
+                            <IconTrash />
+                            <span>Supprimer</span>
+                          </button>
+                        </div>
+                      </foreignObject>
                     )}
-                  </div>
-                </foreignObject>
 
-                {isSelected && (
-                  <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
-                    <div className="quick-add" xmlns="http://www.w3.org/1999/xhtml">
-                      <button
-                        type="button"
-                        className="quick-add-button"
-                        data-no-drag="true"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          addChild()
-                        }}
+                    <foreignObject
+                      x={-NODE_WIDTH / 2}
+                      y={-NODE_HEIGHT / 2}
+                      width={NODE_WIDTH}
+                      height={NODE_HEIGHT}
+                    >
+                      <div
+                        className={`mindmap-node-card ${isSelected ? 'is-selected' : ''} ${isRoot ? 'is-root' : ''}`}
+                        data-pan-stop="true"
+                        xmlns="http://www.w3.org/1999/xhtml"
                       >
-                        <IconPlus />
-                      </button>
-                    </div>
-                  </foreignObject>
-                )}
-              </g>
-            )
-          })}
+                        {isSelected ? (
+                          <input
+                            className="node-input"
+                            data-no-drag="true"
+                            autoFocus
+                            value={draftLabel}
+                            placeholder="Nommez cette idée"
+                            onChange={(event) => updateSelectedLabel(event.target.value)}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={handleNodeKeyDown}
+                          />
+                        ) : (
+                          <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
+                            {displayLabel}
+                          </span>
+                        )}
+                      </div>
+                    </foreignObject>
+
+                    {isSelected && (
+                      <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
+                        <div className="quick-add" xmlns="http://www.w3.org/1999/xhtml">
+                          <button
+                            type="button"
+                            className="quick-add-button"
+                            data-no-drag="true"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              addChild()
+                            }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </foreignObject>
+                    )}
+                  </g>
+                )
+              })}
+            </g>
+          </g>
+
+                      >
+                        {isSelected ? (
+                          <input
+                            className="node-input"
+                            autoFocus
+                            value={draftLabel}
+                            placeholder="Nommez cette idée"
+                            onChange={(event) => updateSelectedLabel(event.target.value)}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={handleNodeKeyDown}
+                          />
+                        ) : (
+                          <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
+                            {displayLabel}
+                          </span>
+                        )}
+                      </div>
+                    </foreignObject>
+
+                    {isSelected && (
+                      <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
+                        <div className="quick-add" data-pan-stop="true" xmlns="http://www.w3.org/1999/xhtml">
+                          <button
+                            type="button"
+                            className="quick-add-button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              addChild()
+                            }}
+                          >
+                            <IconPlus />
+                          </button>
+                        </div>
+                      </foreignObject>
+                    )}
+                  </g>
+                )
+              })}
+            </g>
+          </g>
         </svg>
 
         <div className="canvas-overlay">
