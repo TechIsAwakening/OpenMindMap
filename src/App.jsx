@@ -643,52 +643,11 @@ function App() {
 
                     {isSelected && (
                       <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
-                        <div className="quick-add" xmlns="http://www.w3.org/1999/xhtml">
-                          <button
-                            type="button"
-                            className="quick-add-button"
-                            data-no-drag="true"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              addChild()
-                            }}
-                          >
-                            +
-                          </button>
-                        </div>
-                      </foreignObject>
-                    )}
-                  </g>
-                )
-              })}
-            </g>
-          </g>
-
-                      >
-                        {isSelected ? (
-                          <input
-                            className="node-input"
-                            autoFocus
-                            value={draftLabel}
-                            placeholder="Nommez cette idée"
-                            onChange={(event) => updateSelectedLabel(event.target.value)}
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={handleNodeKeyDown}
-                          />
-                        ) : (
-                          <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
-                            {displayLabel}
-                          </span>
-                        )}
-                      </div>
-                    </foreignObject>
-
-                    {isSelected && (
-                      <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
                         <div className="quick-add" data-pan-stop="true" xmlns="http://www.w3.org/1999/xhtml">
                           <button
                             type="button"
                             className="quick-add-button"
+                            data-no-drag="true"
                             onClick={(event) => {
                               event.stopPropagation()
                               addChild()
