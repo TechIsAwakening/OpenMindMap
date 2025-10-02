@@ -10,7 +10,7 @@ const PLACEHOLDER_LABEL = 'Nommez cette idée'
 const DEFAULT_NODE_SIZE = Object.freeze({ width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT })
 
 const INITIAL_NODES = [
-  { id: 'root', label: 'Ma carte mentale', parentId: null },
+  { id: 'root', label: 'Open Mind Map', parentId: null },
   { id: 'node-1', label: 'Idée clé #1', parentId: 'root' },
   { id: 'node-2', label: 'Idée clé #2', parentId: 'root' },
 ]
