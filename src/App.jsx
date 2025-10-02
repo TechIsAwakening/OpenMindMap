@@ -109,20 +109,6 @@ function IconTrash() {
   )
 }
 
-function IconCenter() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path
-        d="M3 10h4m6 0h4M10 3v4m0 6v4m-4-4h8m-4-4h.01"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 function App() {
   const [nodes, setNodes] = useState(INITIAL_NODES)
   const [selectedId, setSelectedId] = useState('root')
@@ -198,11 +184,6 @@ function App() {
     }
   }, [nodes, rootNode, selectedNode])
 
-  const recentre = useCallback(() => {
-    if (!rootNode) return
-    setSelectedId(rootNode.id)
-  }, [rootNode])
-
   const handleCanvasClick = useCallback(() => {
     if (rootNode) {
       setSelectedId(rootNode.id)
@@ -225,165 +206,123 @@ function App() {
 
   return (
     <div className="app">
-      <header className="top-bar">
-        <div>
-          <p className="top-tag">POC interactif</p>
-          <h1 className="top-title">OpenMindMap</h1>
-          <p className="top-subtitle">
-            Ajoutez et renommez vos idées directement sur la carte. Appuyez sur <strong>Entrée</strong> ou
-            <strong> Tab</strong> pour créer une idée secondaire.
-          </p>
-        </div>
-        <div className="top-metrics">
-          <div>
-            <span className="metric-value">{nodes.length}</span>
-            <span className="metric-label">idées</span>
-          </div>
-          <div>
-            <span className="metric-value">{Math.max(...nodes.map((node) => positions[node.id]?.depth ?? 0), 0) + 1}</span>
-            <span className="metric-label">niveaux</span>
-          </div>
-        </div>
-      </header>
+      <div className="canvas-wrapper" onClick={handleCanvasClick}>
+        <svg className="mindmap-canvas" viewBox="-720 -480 1440 960">
+          <defs>
+            <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="14" stdDeviation="14" floodColor="rgba(15, 23, 42, 0.22)" />
+            </filter>
+          </defs>
 
-      <main className="workspace">
-        <section className="canvas-wrapper" onClick={handleCanvasClick}>
-          <svg className="mindmap-canvas" viewBox="-720 -480 1440 960">
-            <defs>
-              <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="140%">
-                <feDropShadow dx="0" dy="14" stdDeviation="14" floodColor="rgba(15, 23, 42, 0.22)" />
-              </filter>
-            </defs>
-
-            {nodes
-              .filter((node) => node.parentId !== null)
-              .map((node) => {
-                const parentPos = node.parentId ? positions[node.parentId] : null
-                const nodePos = positions[node.id]
-                if (!parentPos || !nodePos) return null
-
-                return (
-                  <line
-                    key={`line-${node.id}`}
-                    x1={parentPos.x}
-                    y1={parentPos.y}
-                    x2={nodePos.x}
-                    y2={nodePos.y}
-                    className="mindmap-connection"
-                  />
-                )
-              })}
-
-            {nodes.map((node) => {
+          {nodes
+            .filter((node) => node.parentId !== null)
+            .map((node) => {
+              const parentPos = node.parentId ? positions[node.parentId] : null
               const nodePos = positions[node.id]
-              if (!nodePos) return null
-              const isSelected = node.id === selectedNode?.id
-              const isRoot = node.id === rootNode?.id
-              const displayLabel = node.label.trim().length > 0 ? node.label : 'Nommez cette idée'
+              if (!parentPos || !nodePos) return null
 
               return (
-                <g
-                  key={node.id}
-                  transform={`translate(${nodePos.x}, ${nodePos.y})`}
-                  className="mindmap-node"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setSelectedId(node.id)
-                  }}
-                >
-                  {isSelected && (
-                    <foreignObject
-                      x={-110}
-                      y={-NODE_HEIGHT / 2 - 56}
-                      width={220}
-                      height={48}
-                      className="toolbar-wrapper"
-                    >
-                      <div className="floating-toolbar" xmlns="http://www.w3.org/1999/xhtml">
-                        <button type="button" className="toolbar-button" onClick={(event) => {
+                <line
+                  key={`line-${node.id}`}
+                  x1={parentPos.x}
+                  y1={parentPos.y}
+                  x2={nodePos.x}
+                  y2={nodePos.y}
+                  className="mindmap-connection"
+                />
+              )
+            })}
+
+          {nodes.map((node) => {
+            const nodePos = positions[node.id]
+            if (!nodePos) return null
+            const isSelected = node.id === selectedNode?.id
+            const isRoot = node.id === rootNode?.id
+            const displayLabel = node.label.trim().length > 0 ? node.label : 'Nommez cette idée'
+
+            return (
+              <g
+                key={node.id}
+                transform={`translate(${nodePos.x}, ${nodePos.y})`}
+                className="mindmap-node"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setSelectedId(node.id)
+                }}
+              >
+                {isSelected && (
+                  <foreignObject
+                    x={-110}
+                    y={-NODE_HEIGHT / 2 - 56}
+                    width={220}
+                    height={48}
+                    className="toolbar-wrapper"
+                  >
+                    <div className="floating-toolbar" xmlns="http://www.w3.org/1999/xhtml">
+                      <button
+                        type="button"
+                        className="toolbar-button"
+                        disabled={isRoot}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          removeSelectedBranch()
+                        }}
+                      >
+                        <IconTrash />
+                        <span>Supprimer</span>
+                      </button>
+                    </div>
+                  </foreignObject>
+                )}
+
+                <foreignObject x={-NODE_WIDTH / 2} y={-NODE_HEIGHT / 2} width={NODE_WIDTH} height={NODE_HEIGHT}>
+                  <div
+                    className={`mindmap-node-card ${isSelected ? 'is-selected' : ''} ${isRoot ? 'is-root' : ''}`}
+                    xmlns="http://www.w3.org/1999/xhtml"
+                  >
+                    {isSelected ? (
+                      <input
+                        className="node-input"
+                        autoFocus
+                        value={draftLabel}
+                        placeholder="Nommez cette idée"
+                        onChange={(event) => updateSelectedLabel(event.target.value)}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={handleNodeKeyDown}
+                      />
+                    ) : (
+                      <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
+                        {displayLabel}
+                      </span>
+                    )}
+                  </div>
+                </foreignObject>
+
+                {isSelected && (
+                  <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
+                    <div className="quick-add" xmlns="http://www.w3.org/1999/xhtml">
+                      <button
+                        type="button"
+                        className="quick-add-button"
+                        onClick={(event) => {
                           event.stopPropagation()
                           addChild()
                         }}
-                        >
-                          <IconPlus />
-                          <span>Ajouter</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="toolbar-button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            recentre()
-                          }}
-                        >
-                          <IconCenter />
-                          <span>Centre</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="toolbar-button"
-                          disabled={isRoot}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            removeSelectedBranch()
-                          }}
-                        >
-                          <IconTrash />
-                          <span>Suppr.</span>
-                        </button>
-                      </div>
-                    </foreignObject>
-                  )}
-
-                  <foreignObject x={-NODE_WIDTH / 2} y={-NODE_HEIGHT / 2} width={NODE_WIDTH} height={NODE_HEIGHT}>
-                    <div
-                      className={`mindmap-node-card ${isSelected ? 'is-selected' : ''} ${isRoot ? 'is-root' : ''}`}
-                      xmlns="http://www.w3.org/1999/xhtml"
-                    >
-                      {isSelected ? (
-                        <input
-                          className="node-input"
-                          autoFocus
-                          value={draftLabel}
-                          placeholder="Nommez cette idée"
-                          onChange={(event) => updateSelectedLabel(event.target.value)}
-                          onClick={(event) => event.stopPropagation()}
-                          onKeyDown={handleNodeKeyDown}
-                        />
-                      ) : (
-                        <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
-                          {displayLabel}
-                        </span>
-                      )}
+                      >
+                        <IconPlus />
+                      </button>
                     </div>
                   </foreignObject>
+                )}
+              </g>
+            )
+          })}
+        </svg>
 
-                  {isSelected && (
-                    <foreignObject x={NODE_WIDTH / 2 + 12} y={-22} width={44} height={44}>
-                      <div className="quick-add" xmlns="http://www.w3.org/1999/xhtml">
-                        <button
-                          type="button"
-                          className="quick-add-button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            addChild()
-                          }}
-                        >
-                          <IconPlus />
-                        </button>
-                      </div>
-                    </foreignObject>
-                  )}
-                </g>
-              )
-            })}
-          </svg>
-
-          <div className="canvas-overlay">
-            <div className="overlay-tip">Cliquez sur la carte pour sélectionner un nœud. Ctrl + Retour arrière pour supprimer.</div>
-          </div>
-        </section>
-      </main>
+        <div className="canvas-overlay">
+          <div className="overlay-tip">Cliquez sur la carte pour sélectionner un nœud. Ctrl + Retour arrière pour supprimer.</div>
+        </div>
+      </div>
     </div>
   )
 }
