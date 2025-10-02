@@ -638,9 +638,7 @@ function App() {
         transition: opacity 0.15s ease, transform 0.15s ease;
         z-index: 10;
       }
-      .color-picker:hover .color-grid,
-      .color-picker.is-open .color-grid,
-      .color-button:focus + .color-grid {
+      .color-picker.is-open .color-grid {
         opacity: 1;
         pointer-events: auto;
         transform: translateY(0);
@@ -687,7 +685,7 @@ function App() {
         <div class="color-picker" id="color-picker">
           <button type="button" class="color-button" id="color-button" aria-haspopup="true" aria-expanded="false" aria-controls="color-palette">
             <span class="color-preview" id="color-preview" aria-hidden="true"></span>
-            <span>Palette</span>
+            <span>Couleur</span>
           </button>
           <div class="color-grid" id="color-palette" role="listbox">
             ${colorOptionsMarkup}
