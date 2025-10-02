@@ -53,6 +53,15 @@ L’accent est mis sur :
 
 ---
 
+## 💾 Sauvegarde locale & formats d'échange
+
+L'application conserve automatiquement la dernière version de votre carte mentale dans le navigateur via `localStorage`. À chaque modification, la structure des nœuds est sérialisée et rechargée lors du prochain démarrage. Vous pouvez à tout moment déclencher une exportation manuelle dans le panneau d'actions de l'interface.
+
+Formats supportés :
+
+- **JSON** (`openmindmap.json`) : représente directement la structure interne (`id`, `label`, `children`). C'est le format de sauvegarde recommandé et celui utilisé dans `localStorage`.
+- **OPML** (`openmindmap.opml`) : compatible avec la majorité des logiciels de mind mapping. Chaque nœud est exporté sous forme d'élément `<outline>` avec les attributs `text` (titre) et `id`. À l'import, la hiérarchie OPML est convertie vers la structure interne de l'application.
+
 ## 📦 Installation (MVP local)
 
 ```bash
