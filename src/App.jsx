@@ -119,6 +119,7 @@ function App() {
   const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(false)
   const idCounter = useRef(nextIdFromInitial)
   const svgRef = useRef(null)
+  const historyRef = useRef({ past: [], future: [] })
   const panStateRef = useRef({
     isPanning: false,
     pointerId: null,
@@ -176,7 +177,148 @@ function App() {
     } else {
       setDraftLabel('')
     }
-  }, [selectedNode?.id])
+  }, [selectedNode?.id, selectedNode?.label])
+
+  const cloneSnapshot = useCallback((snapshot) => {
+    const nodesClone = (snapshot.nodes ?? []).map((node) => ({ ...node }))
+    const customPositionsSource = snapshot.customPositions ?? {}
+    const customPositionsClone = Object.fromEntries(
+      Object.entries(customPositionsSource).map(([key, value]) => [key, { ...value }]),
+    )
+
+    return {
+      nodes: nodesClone,
+      customPositions: customPositionsClone,
+      selectedId: snapshot.selectedId ?? null,
+    }
+  }, [])
+
+  const captureSnapshot = useCallback(() => {
+    return cloneSnapshot({ nodes, customPositions, selectedId })
+  }, [cloneSnapshot, customPositions, nodes, selectedId])
+
+  const applySnapshot = useCallback(
+    (snapshot) => {
+      const cloned = cloneSnapshot(snapshot)
+      setNodes(cloned.nodes)
+      setCustomPositions(cloned.customPositions)
+      setSelectedId(cloned.selectedId)
+    },
+    [cloneSnapshot],
+  )
+
+  const areSnapshotsEqual = useCallback((a, b) => {
+    if (a.nodes.length !== b.nodes.length) {
+      return false
+    }
+
+    for (let index = 0; index < a.nodes.length; index += 1) {
+      const nodeA = a.nodes[index]
+      const nodeB = b.nodes[index]
+      if (nodeA.id !== nodeB.id || nodeA.label !== nodeB.label || nodeA.parentId !== nodeB.parentId) {
+        return false
+      }
+    }
+
+    const keysA = Object.keys(a.customPositions)
+    const keysB = Object.keys(b.customPositions)
+    if (keysA.length !== keysB.length) {
+      return false
+    }
+
+    for (const key of keysA) {
+      const posA = a.customPositions[key]
+      const posB = b.customPositions[key]
+      if (!posB || posA.x !== posB.x || posA.y !== posB.y) {
+        return false
+      }
+    }
+
+    return a.selectedId === b.selectedId
+  }, [])
+
+  const pushSnapshotToHistory = useCallback(
+    (snapshot) => {
+      const { past } = historyRef.current
+      const lastSnapshot = past[past.length - 1]
+      if (lastSnapshot && areSnapshotsEqual(lastSnapshot, snapshot)) {
+        return
+      }
+      historyRef.current = {
+        past: [...past, cloneSnapshot(snapshot)],
+        future: [],
+      }
+    },
+    [areSnapshotsEqual, cloneSnapshot],
+  )
+
+  const recordHistory = useCallback(() => {
+    pushSnapshotToHistory(captureSnapshot())
+  }, [captureSnapshot, pushSnapshotToHistory])
+
+  const undo = useCallback(() => {
+    const { past, future } = historyRef.current
+    if (past.length === 0) {
+      return
+    }
+
+    const currentSnapshot = captureSnapshot()
+    const previousSnapshot = past[past.length - 1]
+    historyRef.current = {
+      past: past.slice(0, past.length - 1),
+      future: [cloneSnapshot(currentSnapshot), ...future],
+    }
+    applySnapshot(previousSnapshot)
+  }, [applySnapshot, captureSnapshot, cloneSnapshot])
+
+  const redo = useCallback(() => {
+    const { past, future } = historyRef.current
+    if (future.length === 0) {
+      return
+    }
+
+    const currentSnapshot = captureSnapshot()
+    const nextSnapshot = future[0]
+    historyRef.current = {
+      past: [...past, cloneSnapshot(currentSnapshot)],
+      future: future.slice(1),
+    }
+    applySnapshot(nextSnapshot)
+  }, [applySnapshot, captureSnapshot, cloneSnapshot])
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!(event.metaKey || event.ctrlKey)) {
+        return
+      }
+
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+
+      if (event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          redo()
+        } else {
+          undo()
+        }
+      } else if (event.key.toLowerCase() === 'y') {
+        event.preventDefault()
+        redo()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [redo, undo])
 
   const updateSelectedLabel = useCallback(
     (label) => {
@@ -199,6 +341,8 @@ function App() {
   const addChild = useCallback(() => {
     if (!selectedNode) return
 
+    recordHistory()
+
     const newNode = {
       id: `node-${idCounter.current}`,
       label: '',
@@ -209,10 +353,12 @@ function App() {
     setNodes((prev) => [...prev, newNode])
     setSelectedId(newNode.id)
     setDraftLabel('')
-  }, [selectedNode])
+  }, [recordHistory, selectedNode])
 
   const removeSelectedBranch = useCallback(() => {
     if (!selectedNode || selectedNode.id === rootNode?.id) return
+
+    recordHistory()
 
     const toDelete = getBranchToDelete(nodes, selectedNode.id)
     setNodes((prev) => prev.filter((node) => !toDelete.has(node.id)))
@@ -230,7 +376,7 @@ function App() {
     if (rootNode) {
       setSelectedId(rootNode.id)
     }
-  }, [nodes, rootNode, selectedNode])
+  }, [nodes, recordHistory, rootNode, selectedNode])
 
   const handleCanvasClick = useCallback(() => {
     if (panStateRef.current.moved) {
@@ -428,13 +574,15 @@ function App() {
         pointerId: event.pointerId,
         startPointer: svgPoint,
         startPosition: { x: nodePosition.x, y: nodePosition.y },
+        historySnapshot: captureSnapshot(),
+        historyRecorded: false,
       }
 
       setDraggingNodeId(node.id)
       event.currentTarget.setPointerCapture?.(event.pointerId)
       event.preventDefault()
     },
-    [convertPointerToSvgPoint, positions, rootNode],
+    [captureSnapshot, convertPointerToSvgPoint, positions, rootNode],
   )
 
   const handleNodePointerMove = useCallback(
@@ -457,6 +605,19 @@ function App() {
         dragState.startPosition.y + deltaY,
       )
 
+      const hasMoved =
+        nextPosition.x !== dragState.startPosition.x ||
+        nextPosition.y !== dragState.startPosition.y
+
+      if (!dragState.historyRecorded && !hasMoved) {
+        return
+      }
+
+      if (!dragState.historyRecorded) {
+        pushSnapshotToHistory(dragState.historySnapshot)
+        dragState.historyRecorded = true
+      }
+
       setCustomPositions((prev) => {
         const previous = prev[dragState.nodeId]
         if (previous && previous.x === nextPosition.x && previous.y === nextPosition.y) {
@@ -468,7 +629,7 @@ function App() {
         }
       })
     },
-    [convertPointerToSvgPoint, snapPosition],
+    [convertPointerToSvgPoint, pushSnapshotToHistory, snapPosition],
   )
 
   const endDragging = useCallback(() => {
