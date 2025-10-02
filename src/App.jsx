@@ -847,13 +847,11 @@ function App() {
               onChange={handleImportFromFile}
               style={{ display: 'none' }}
             />
-            <div className="save-status">
-              {formattedLastSavedAt ? (
+            {formattedLastSavedAt && (
+              <div className="save-status">
                 <span>Dernière sauvegarde : {formattedLastSavedAt}</span>
-              ) : (
-                <span>Aucune sauvegarde effectuée</span>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
