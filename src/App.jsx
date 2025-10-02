@@ -4,7 +4,6 @@ import './App.css'
 const LEVEL_SPACING = 220
 const NODE_WIDTH = 220
 const NODE_HEIGHT = 88
-const GRID_SIZE = 40
 
 const INITIAL_NODES = [
   { id: 'root', label: 'Ma carte mentale', parentId: null },
@@ -169,9 +168,6 @@ function App() {
     () => storedStateRef.current?.customPositions ?? {},
   )
   const [draggingNodeId, setDraggingNodeId] = useState(null)
-  const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(
-    () => storedStateRef.current?.isGridSnappingEnabled ?? false,
-  )
   const [viewTransform, setViewTransform] = useState(
     () =>
       storedStateRef.current?.viewTransform ?? {
@@ -232,8 +228,6 @@ function App() {
           }
         : { x: 0, y: 0, scale: 1 }
 
-    const nextIsGridSnappingEnabled = Boolean(rawState?.isGridSnappingEnabled)
-
     const nextIdCounter = (() => {
       const providedCounter = Number.isFinite(rawState?.idCounter) ? rawState.idCounter : null
       const nextFromNodes = computeNextIdFromNodes(nextNodes)
@@ -258,7 +252,6 @@ function App() {
     setDraftLabel(selectedNodeFromImport?.label ?? '')
     setCustomPositions(nextCustomPositions)
     setViewTransform(nextViewTransform)
-    setIsGridSnappingEnabled(nextIsGridSnappingEnabled)
     setLastSavedAt(persistedAt)
     idCounter.current = nextIdCounter
 
@@ -267,7 +260,6 @@ function App() {
         nodes: nextNodes,
         customPositions: nextCustomPositions,
         viewTransform: nextViewTransform,
-        isGridSnappingEnabled: nextIsGridSnappingEnabled,
         selectedId: fallbackSelectedId,
         idCounter: nextIdCounter,
         lastSavedAt: persistedAt,
@@ -331,7 +323,6 @@ function App() {
       nodes,
       customPositions,
       viewTransform,
-      isGridSnappingEnabled,
       selectedId: selectedNode?.id ?? null,
       idCounter: idCounter.current,
       lastSavedAt: new Date().toISOString(),
@@ -343,7 +334,7 @@ function App() {
     } catch (error) {
       console.error("Impossible d'enregistrer la sauvegarde locale", error)
     }
-  }, [customPositions, isGridSnappingEnabled, nodes, selectedNode?.id, viewTransform])
+  }, [customPositions, nodes, selectedNode?.id, viewTransform])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -663,18 +654,6 @@ function App() {
     return { x: transformed.x, y: transformed.y }
   }, [])
 
-  const snapPosition = useCallback(
-    (x, y) => {
-      if (!isGridSnappingEnabled) {
-        return { x, y }
-      }
-      const snappedX = Math.round(x / GRID_SIZE) * GRID_SIZE
-      const snappedY = Math.round(y / GRID_SIZE) * GRID_SIZE
-      return { x: snappedX, y: snappedY }
-    },
-    [isGridSnappingEnabled],
-  )
-
   const handleNodePointerDown = useCallback(
     (event, node) => {
       event.stopPropagation()
@@ -723,10 +702,10 @@ function App() {
 
       const deltaX = svgPoint.x - dragState.startPointer.x
       const deltaY = svgPoint.y - dragState.startPointer.y
-      const nextPosition = snapPosition(
-        dragState.startPosition.x + deltaX,
-        dragState.startPosition.y + deltaY,
-      )
+      const nextPosition = {
+        x: dragState.startPosition.x + deltaX,
+        y: dragState.startPosition.y + deltaY,
+      }
 
       setCustomPositions((prev) => {
         const previous = prev[dragState.nodeId]
@@ -739,7 +718,7 @@ function App() {
         }
       })
     },
-    [convertPointerToSvgPoint, snapPosition],
+    [convertPointerToSvgPoint],
   )
 
   const endDragging = useCallback(() => {
@@ -793,7 +772,7 @@ function App() {
   return (
     <div className="app">
       <div
-        className={`canvas-wrapper ${isGridSnappingEnabled ? 'with-grid' : ''}`}
+        className="canvas-wrapper"
         onClick={handleCanvasClick}
       >
         <svg
@@ -938,14 +917,6 @@ function App() {
 
         <div className="canvas-overlay" data-pan-stop="true">
           <div className="overlay-panel">
-            <label className="grid-toggle">
-              <input
-                type="checkbox"
-                checked={isGridSnappingEnabled}
-                onChange={(event) => setIsGridSnappingEnabled(event.target.checked)}
-              />
-              <span>Aligner sur la grille</span>
-            </label>
             <div className="overlay-actions">
               <button type="button" className="overlay-button overlay-button--primary" onClick={saveState}>
                 <span aria-hidden="true">💾</span>
@@ -977,9 +948,6 @@ function App() {
               ) : (
                 <span>Aucune sauvegarde locale</span>
               )}
-            </div>
-            <div className="overlay-tip">
-              Cliquez sur un nœud pour le sélectionner, glissez-déposez pour le déplacer. Ctrl + Retour arrière pour supprimer.
             </div>
           </div>
         </div>
