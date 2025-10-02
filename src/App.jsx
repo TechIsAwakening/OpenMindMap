@@ -8,11 +8,22 @@ const MAX_NODE_WIDTH = 420
 const GRID_SIZE = 40
 const PLACEHOLDER_LABEL = 'Nommez cette idée'
 const DEFAULT_NODE_SIZE = Object.freeze({ width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT })
+const DEFAULT_NODE_COLOR = '#ffffff'
+const COLOR_OPTIONS = Object.freeze([
+  '#f97316',
+  '#fbbf24',
+  '#34d399',
+  '#22d3ee',
+  '#60a5fa',
+  '#a855f7',
+  '#f472b6',
+  '#f43f5e',
+])
 
 const INITIAL_NODES = [
-  { id: 'root', label: 'Ma carte mentale', parentId: null },
-  { id: 'node-1', label: 'Idée clé #1', parentId: 'root' },
-  { id: 'node-2', label: 'Idée clé #2', parentId: 'root' },
+  { id: 'root', label: 'Ma carte mentale', parentId: null, color: DEFAULT_NODE_COLOR },
+  { id: 'node-1', label: 'Idée clé #1', parentId: 'root', color: DEFAULT_NODE_COLOR },
+  { id: 'node-2', label: 'Idée clé #2', parentId: 'root', color: DEFAULT_NODE_COLOR },
 ]
 
 const nextIdFromInitial =
@@ -113,6 +124,57 @@ function IconTrash() {
   )
 }
 
+function IconPalette() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M10 3.5a6.5 6.5 0 0 0-6.5 6.5c0 3.1 2.22 6 5.2 6 1.22 0 1.8-.6 1.8-1.24 0-.58-.3-1.1-1-1.2-.7-.12-1.2-.68-1.2-1.32 0-.84.68-1.24 1.32-1.24h2.43c1.9 0 3.45-1.56 3.45-3.5A4 4 0 0 0 10 3.5Zm-1.85 2.1a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm3.7 0a1 1 0 1 1 2 0 1 1 0 0 1-2 0Zm2.3 2.6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm-8.3 1.6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"
+        fill="currentColor"
+        fillRule="evenodd"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
+function clamp01(value) {
+  return Math.min(Math.max(value, 0), 1)
+}
+
+function hexToRgb(hex) {
+  if (typeof hex !== 'string') return null
+  const normalized = hex.replace('#', '')
+  if (normalized.length !== 6) return null
+  const r = Number.parseInt(normalized.slice(0, 2), 16)
+  const g = Number.parseInt(normalized.slice(2, 4), 16)
+  const b = Number.parseInt(normalized.slice(4, 6), 16)
+  if ([r, g, b].some((value) => Number.isNaN(value))) return null
+  return { r, g, b }
+}
+
+function getRelativeLuminance(hexColor) {
+  const rgb = hexToRgb(hexColor)
+  if (!rgb) return 1
+  const transform = (value) => {
+    const channel = value / 255
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  }
+  const r = transform(rgb.r)
+  const g = transform(rgb.g)
+  const b = transform(rgb.b)
+  return clamp01(0.2126 * r + 0.7152 * g + 0.0722 * b)
+}
+
+function getTextColorForBackground(hexColor) {
+  const luminance = getRelativeLuminance(hexColor)
+  return luminance > 0.6 ? '#0f172a' : '#f8fafc'
+}
+
+function getBorderColorForBackground(hexColor) {
+  const luminance = getRelativeLuminance(hexColor)
+  return luminance > 0.6 ? 'rgba(15, 23, 42, 0.25)' : 'rgba(248, 250, 252, 0.75)'
+}
+
 function App() {
   const [nodes, setNodes] = useState(INITIAL_NODES)
   const [selectedId, setSelectedId] = useState('root')
@@ -121,6 +183,7 @@ function App() {
   const [draggingNodeId, setDraggingNodeId] = useState(null)
   const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(false)
   const [nodeSizes, setNodeSizes] = useState({})
+  const [isColorPaletteOpen, setIsColorPaletteOpen] = useState(false)
   const idCounter = useRef(nextIdFromInitial)
   const svgRef = useRef(null)
   const panStateRef = useRef({
@@ -140,6 +203,7 @@ function App() {
 
   const dragStateRef = useRef(null)
   const measurementRef = useRef(null)
+  const colorPickerTimeoutRef = useRef(null)
 
   useLayoutEffect(() => {
     if (typeof document === 'undefined') return
@@ -260,7 +324,16 @@ function App() {
     } else {
       setDraftLabel('')
     }
+    setIsColorPaletteOpen(false)
   }, [selectedNode])
+
+  useEffect(() => {
+    return () => {
+      if (colorPickerTimeoutRef.current) {
+        clearTimeout(colorPickerTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const updateSelectedLabel = useCallback(
     (label) => {
@@ -287,6 +360,7 @@ function App() {
       id: `node-${idCounter.current}`,
       label: '',
       parentId: selectedNode.id,
+      color: DEFAULT_NODE_COLOR,
     }
 
     idCounter.current += 1
@@ -315,6 +389,46 @@ function App() {
       setSelectedId(rootNode.id)
     }
   }, [nodes, rootNode, selectedNode])
+
+  const handleColorSelect = useCallback(
+    (color) => {
+      if (!selectedNode) return
+      if (colorPickerTimeoutRef.current) {
+        clearTimeout(colorPickerTimeoutRef.current)
+        colorPickerTimeoutRef.current = null
+      }
+      setNodes((prev) =>
+        prev.map((node) =>
+          node.id === selectedNode.id
+            ? {
+                ...node,
+                color,
+              }
+            : node,
+        ),
+      )
+      setIsColorPaletteOpen(false)
+    },
+    [selectedNode],
+  )
+
+  const openColorPalette = useCallback(() => {
+    if (colorPickerTimeoutRef.current) {
+      clearTimeout(colorPickerTimeoutRef.current)
+      colorPickerTimeoutRef.current = null
+    }
+    setIsColorPaletteOpen(true)
+  }, [])
+
+  const closeColorPalette = useCallback(() => {
+    if (colorPickerTimeoutRef.current) {
+      clearTimeout(colorPickerTimeoutRef.current)
+    }
+    colorPickerTimeoutRef.current = setTimeout(() => {
+      setIsColorPaletteOpen(false)
+      colorPickerTimeoutRef.current = null
+    }, 80)
+  }, [])
 
   const handleCanvasClick = useCallback(() => {
     if (panStateRef.current.moved) {
@@ -654,7 +768,25 @@ function App() {
                 const isRoot = node.id === rootNode?.id
                 const displayLabel = node.label.trim().length > 0 ? node.label : PLACEHOLDER_LABEL
                 const size = nodeSizes[node.id] ?? DEFAULT_NODE_SIZE
-                const toolbarWidth = Math.max(size.width, 220)
+                const toolbarWidth = Math.max(size.width, 260)
+                const toolbarHeight = isSelected ? (isColorPaletteOpen ? 152 : 48) : 48
+                const toolbarY = -size.height / 2 - 8 - toolbarHeight
+                const nodeColor = node.color ?? DEFAULT_NODE_COLOR
+                const textColor = getTextColorForBackground(nodeColor)
+                const borderColor = getBorderColorForBackground(nodeColor)
+                const placeholderColor =
+                  textColor === '#f8fafc'
+                    ? 'rgba(248, 250, 252, 0.78)'
+                    : 'rgba(15, 23, 42, 0.45)'
+                const cardStyle = {
+                  backgroundColor: nodeColor,
+                  color: textColor,
+                  borderColor,
+                  '--node-background': nodeColor,
+                  '--node-text-color': textColor,
+                  '--node-border-color': borderColor,
+                  '--node-placeholder-color': placeholderColor,
+                }
 
                 return (
                   <g
@@ -674,25 +806,91 @@ function App() {
                     {isSelected && (
                       <foreignObject
                         x={-toolbarWidth / 2}
-                        y={-size.height / 2 - 56}
+                        y={toolbarY}
                         width={toolbarWidth}
-                        height={48}
+                        height={toolbarHeight}
                         className="toolbar-wrapper"
                       >
-                        <div className="floating-toolbar" data-pan-stop="true" xmlns="http://www.w3.org/1999/xhtml">
-                          <button
-                            type="button"
-                            className="toolbar-button"
-                            data-no-drag="true"
-                            disabled={isRoot}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              removeSelectedBranch()
-                            }}
-                          >
-                            <IconTrash />
-                            <span>Supprimer</span>
-                          </button>
+                        <div className="toolbar-surface" data-pan-stop="true" xmlns="http://www.w3.org/1999/xhtml">
+                          <div className="floating-toolbar" data-pan-stop="true">
+                            <button
+                              type="button"
+                              className="toolbar-button"
+                              data-no-drag="true"
+                              disabled={isRoot}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                removeSelectedBranch()
+                              }}
+                            >
+                              <IconTrash />
+                              <span>Supprimer</span>
+                            </button>
+                            <div
+                              className="toolbar-color-picker"
+                              data-pan-stop="true"
+                              onMouseEnter={openColorPalette}
+                              onMouseLeave={closeColorPalette}
+                              onFocus={openColorPalette}
+                              onBlur={(event) => {
+                                if (!event.currentTarget.contains(event.relatedTarget)) {
+                                  if (colorPickerTimeoutRef.current) {
+                                    clearTimeout(colorPickerTimeoutRef.current)
+                                    colorPickerTimeoutRef.current = null
+                                  }
+                                  setIsColorPaletteOpen(false)
+                                }
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className={`toolbar-button ${isColorPaletteOpen ? 'is-active' : ''}`}
+                                data-no-drag="true"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  if (event.detail === 0) {
+                                    setIsColorPaletteOpen((prev) => !prev)
+                                  }
+                                }}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                title="Changer la couleur"
+                              >
+                                <IconPalette />
+                                <span>Couleur</span>
+                                <span
+                                  className="toolbar-color-sample"
+                                  aria-hidden="true"
+                                  style={{ backgroundColor: nodeColor }}
+                                />
+                              </button>
+                              {isColorPaletteOpen && (
+                                <div
+                                  className="color-palette"
+                                  data-pan-stop="true"
+                                  onMouseEnter={openColorPalette}
+                                  onMouseLeave={closeColorPalette}
+                                >
+                                  {COLOR_OPTIONS.map((option) => {
+                                    const isActive = option === nodeColor
+                                    return (
+                                      <button
+                                        key={option}
+                                        type="button"
+                                        className={`color-swatch ${isActive ? 'is-selected' : ''}`}
+                                        data-no-drag="true"
+                                        style={{ backgroundColor: option }}
+                                        onClick={(event) => {
+                                          event.stopPropagation()
+                                          handleColorSelect(option)
+                                        }}
+                                        aria-label={`Choisir la couleur ${option}`}
+                                      />
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </foreignObject>
                     )}
@@ -707,6 +905,7 @@ function App() {
                         className={`mindmap-node-card ${isSelected ? 'is-selected' : ''} ${isRoot ? 'is-root' : ''}`}
                         data-pan-stop="true"
                         xmlns="http://www.w3.org/1999/xhtml"
+                        style={cardStyle}
                       >
                         {isSelected ? (
                           <input
