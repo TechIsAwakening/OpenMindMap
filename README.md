@@ -1,67 +1,34 @@
-# 🌐 OpenMindMap  
-Application web de **mind mapping** moderne, collaborative et extensible.  
+# 🌐 OpenMindMap — Proof of Concept
 
-## 🚀 Objectifs
-OpenMindMap permet de créer, organiser et partager des cartes mentales de manière fluide et intuitive.  
-L’accent est mis sur :  
-- 🖱️ **Édition fluide** (pan/zoom, drag & drop, annuler/rétablir illimités).  
-- 🤝 **Collaboration en temps réel** avec suivi des modifications.  
-- 🎨 **Personnalisation visuelle** (thèmes clair/sombre, styles de nœuds, icônes, couleurs).  
-- 🔄 **Interopérabilité** (import/export vers Markdown, OPML, JSON, PNG, SVG, PDF).  
-- 🛡️ **Sécurité & versioning** (snapshots, rollback, historique des versions).  
+OpenMindMap est une première ébauche d’application de **mind mapping** collaborative. Ce proof of concept se concentre sur les briques essentielles pour manipuler visuellement une carte et structurer ses idées.
 
----
+## ✨ Fonctionnalités incluses
 
-## ✨ Fonctionnalités prévues
+- Visualisation automatique d’un mind map radial autour d’un sujet principal.
+- Sélection d’un nœud pour le renommer instantanément.
+- Ajout rapide de nouvelles idées liées au nœud sélectionné.
+- Suppression d’une branche entière (sauf le sujet central).
+- Statistiques en direct sur le nombre d’idées et de niveaux.
 
-### 1. Canvas & édition
-- Pan/zoom fluide, minimap, grille + snapping.  
-- Sélection multiple, copier/coller/dupliquer, annuler/rétablir illimités.  
-- Alignement & distribution (smart guides), calques, containers.  
-- Mode focus/zen, multi-onglets/multi-cartes.  
-- Command palette & raccourcis personnalisables.  
+## 🏗️ Stack
 
-### 2. Nœuds & contenus
-- Rich-text (titres, listes, liens, emojis).  
-- Tags, priorités, dates, assignations.  
-- Images, fichiers, audio/vidéo embarqués.  
-- Templates de nœuds réutilisables.  
+- [React](https://react.dev) + [Vite](https://vite.dev)
+- Styles en CSS natif avec la police [Inter](https://rsms.me/inter/)
 
-### 3. Collaboration
-- Multi-curseurs, présence en direct.  
-- Commentaires, @mentions, réactions.  
-- Historique des changements & diff visuel.  
-
-### 4. Import / Export
-- Formats : Markdown, OPML, JSON, FreeMind/XMind.  
-- Export : PNG, SVG, PDF, PPT (présentation).  
-
-### 5. IA assistive (optionnel)
-- Génération de branches à partir de texte ou URL.  
-- Résumés automatiques.  
-- Suggestion de tags et clustering sémantique.  
-
----
-
-## 🛠️ Stack technique (proposée)
-- **Frontend** : React + Vite + TailwindCSS + React Flow.  
-- **Collaboration temps réel** : Y.js / CRDT.  
-- **Backend** : Node.js (Express ou NestJS).  
-- **Base de données** : PostgreSQL + Prisma.  
-- **Stockage fichiers** : S3 compatible (MinIO / AWS).  
-- **Authentification** : OAuth2 / SSO.  
-
----
-
-## 📦 Installation (MVP local)
+## 🚀 Démarrage
 
 ```bash
-# Cloner le repo
-git clone https://github.com/TechIsAwakening/OpenMindMap.git
-cd OpenMindMap
-
-# Installer les dépendances
 npm install
-
-# Lancer en mode dev
 npm run dev
+```
+
+Puis ouvrez [http://localhost:5173](http://localhost:5173) pour découvrir l’interface.
+
+## 🔭 Étapes suivantes possibles
+
+- Navigation avancée (pan/zoom) et multi-sélection.
+- Collaboration temps réel (CRDT) et présence multi-utilisateurs.
+- Gestion avancée du contenu des nœuds (tags, dates, pièces jointes).
+- Export/import vers des formats standard (Markdown, OPML, JSON).
+
+Ce dépôt servira de base pour itérer vers une version complète d’OpenMindMap.
