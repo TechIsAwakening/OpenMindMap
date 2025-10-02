@@ -143,6 +143,21 @@ function IconTrash() {
   )
 }
 
+function IconEdit() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M4 13.5 5.5 16l2.5-.5L15 8.5 12.5 6 4 13.5zm9.5-9 2.5 2.5m-7.32 7.57h7.82"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  )
+}
+
 function App() {
   const [nodes, setNodes] = useState(INITIAL_NODES)
   const [selectedId, setSelectedId] = useState('root')
@@ -170,6 +185,8 @@ function App() {
   const dragStateRef = useRef(null)
   const measurementRef = useRef(null)
   const fileInputRef = useRef(null)
+  const [isConfigOpen, setIsConfigOpen] = useState(false)
+  const configIframeRef = useRef(null)
 
   useLayoutEffect(() => {
     if (typeof document === 'undefined') return
@@ -292,10 +309,9 @@ function App() {
     }
   }, [selectedNode])
 
-  const updateSelectedLabel = useCallback(
+  const applyNodeLabel = useCallback(
     (label) => {
       if (!selectedNode) return
-      setDraftLabel(label)
       setNodes((prev) =>
         prev.map((node) =>
           node.id === selectedNode.id
@@ -345,6 +361,181 @@ function App() {
       setSelectedId(rootNode.id)
     }
   }, [nodes, rootNode, selectedNode])
+
+  const openConfigPanel = useCallback(() => {
+    if (!selectedNode) return
+    setDraftLabel(selectedNode.label)
+    setIsConfigOpen(true)
+  }, [selectedNode])
+
+  const closeConfigPanel = useCallback(() => {
+    setIsConfigOpen(false)
+  }, [])
+
+  useEffect(() => {
+    if (!isConfigOpen) return
+
+    const handleMessage = (event) => {
+      const iframeWindow = configIframeRef.current?.contentWindow
+      if (!iframeWindow || event.source !== iframeWindow) return
+
+      const data = event.data
+      if (!data || data.source !== 'openmindmap-config') return
+
+      if (data.type === 'config-save') {
+        const label = typeof data.payload?.label === 'string' ? data.payload.label : ''
+        setDraftLabel(label)
+        applyNodeLabel(label)
+        closeConfigPanel()
+      }
+
+      if (data.type === 'config-cancel') {
+        closeConfigPanel()
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => {
+      window.removeEventListener('message', handleMessage)
+    }
+  }, [applyNodeLabel, closeConfigPanel, isConfigOpen])
+
+  const configIframeContent = useMemo(() => {
+    const initialData = { label: draftLabel ?? '' }
+
+    return `<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Configuration du nœud</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        color: #0f172a;
+      }
+      .config-root {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 26px 28px;
+        min-height: 100%;
+        background: #ffffff;
+        border-radius: 28px;
+        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+      }
+      .config-header h1 {
+        font-size: 1.2rem;
+        margin: 0 0 4px 0;
+      }
+      .config-header p {
+        margin: 0;
+        color: rgba(15, 23, 42, 0.6);
+        font-size: 0.9rem;
+      }
+      label {
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: rgba(15, 23, 42, 0.85);
+      }
+      textarea {
+        width: 100%;
+        min-height: 180px;
+        resize: vertical;
+        border-radius: 18px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        padding: 14px 16px;
+        font: inherit;
+        color: inherit;
+        background: rgba(241, 245, 249, 0.6);
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+      }
+      textarea:focus {
+        outline: 3px solid rgba(59, 130, 246, 0.35);
+        background: #ffffff;
+      }
+      .config-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+      }
+      button {
+        border: none;
+        border-radius: 999px;
+        padding: 10px 20px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        cursor: pointer;
+        color: #ffffff;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      #cancel {
+        background: #ef4444;
+        box-shadow: 0 12px 24px rgba(239, 68, 68, 0.25);
+      }
+      #cancel:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 30px rgba(239, 68, 68, 0.3);
+      }
+      #save {
+        background: #22c55e;
+        box-shadow: 0 12px 24px rgba(34, 197, 94, 0.25);
+      }
+      #save:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 30px rgba(34, 197, 94, 0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="config-root">
+      <div class="config-header">
+        <h1>Configuration du nœud</h1>
+        <p>Modifiez le contenu du nœud et préparez l'espace pour de futurs réglages.</p>
+      </div>
+      <label for="node-label">Contenu du nœud</label>
+      <textarea id="node-label" placeholder="${PLACEHOLDER_LABEL}"></textarea>
+      <div class="config-actions">
+        <button type="button" id="cancel">Annuler</button>
+        <button type="button" id="save">Sauvegarder</button>
+      </div>
+    </div>
+    <script>
+      ;(function () {
+        const initialData = ${JSON.stringify(initialData)}
+        const textarea = document.getElementById('node-label')
+        const send = (type, payload) => {
+          parent.postMessage({ source: 'openmindmap-config', type, payload }, '*')
+        }
+        textarea.value = initialData.label || ''
+        textarea.focus()
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+        const handleSave = () => send('config-save', { label: textarea.value })
+        document.getElementById('cancel').addEventListener('click', () => send('config-cancel'))
+        document.getElementById('save').addEventListener('click', handleSave)
+        textarea.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            send('config-cancel')
+          }
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'enter') {
+            event.preventDefault()
+            handleSave()
+          }
+        })
+      })()
+    </script>
+  </body>
+</html>`
+  }, [draftLabel])
 
   const handleCanvasClick = useCallback(() => {
     if (panStateRef.current.moved) {
@@ -478,20 +669,6 @@ function App() {
       })
     },
     [getSvgPoint],
-  )
-
-  const handleNodeKeyDown = useCallback(
-    (event) => {
-      if (event.key === 'Enter' || event.key === 'Tab') {
-        event.preventDefault()
-        addChild()
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'backspace') {
-        event.preventDefault()
-        removeSelectedBranch()
-      }
-    },
-    [addChild, removeSelectedBranch],
   )
 
   const convertPointerToSvgPoint = useCallback((event) => {
@@ -762,7 +939,7 @@ function App() {
                 const isRoot = node.id === rootNode?.id
                 const displayLabel = node.label.trim().length > 0 ? node.label : PLACEHOLDER_LABEL
                 const size = nodeSizes[node.id] ?? DEFAULT_NODE_SIZE
-                const toolbarWidth = Math.max(size.width, 220)
+                const toolbarWidth = Math.max(size.width, 280)
 
                 return (
                   <g
@@ -792,6 +969,19 @@ function App() {
                             type="button"
                             className="toolbar-button"
                             data-no-drag="true"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setSelectedId(node.id)
+                              openConfigPanel()
+                            }}
+                          >
+                            <IconEdit />
+                            <span>Modifier</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="toolbar-button"
+                            data-no-drag="true"
                             disabled={isRoot}
                             onClick={(event) => {
                               event.stopPropagation()
@@ -816,22 +1006,9 @@ function App() {
                         data-pan-stop="true"
                         xmlns="http://www.w3.org/1999/xhtml"
                       >
-                        {isSelected ? (
-                          <input
-                            className="node-input"
-                            data-no-drag="true"
-                            autoFocus
-                            value={draftLabel}
-                            placeholder={PLACEHOLDER_LABEL}
-                            onChange={(event) => updateSelectedLabel(event.target.value)}
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={handleNodeKeyDown}
-                          />
-                        ) : (
-                          <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
-                            {displayLabel}
-                          </span>
-                        )}
+                        <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
+                          {displayLabel}
+                        </span>
                       </div>
                     </foreignObject>
 
@@ -879,6 +1056,26 @@ function App() {
           </div>
         </div>
       </div>
+      {isConfigOpen && (
+        <div className="config-modal-backdrop" role="presentation" onClick={closeConfigPanel}>
+          <div
+            className="config-iframe-wrapper"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Configuration du nœud"
+            data-pan-stop="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <iframe
+              ref={configIframeRef}
+              className="config-iframe"
+              title="Configuration du nœud"
+              sandbox="allow-scripts allow-same-origin"
+              srcDoc={configIframeContent}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
