@@ -5,7 +5,6 @@ const LEVEL_SPACING = 220
 const MIN_NODE_WIDTH = 120
 const MIN_NODE_HEIGHT = 40
 const MAX_NODE_WIDTH = 420
-const GRID_SIZE = 40
 const PLACEHOLDER_LABEL = 'Nommez cette idée'
 const DEFAULT_NODE_SIZE = Object.freeze({ width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT })
 
@@ -21,6 +20,37 @@ const nextIdFromInitial =
     if (!match) return acc
     return Math.max(acc, Number.parseInt(match[1], 10))
   }, 0) + 1
+
+function getNextIdFromNodes(nodes) {
+  return (
+    nodes.reduce((acc, node) => {
+      if (typeof node.id !== 'string') return acc
+      const match = node.id.match(/node-(\d+)/)
+      if (!match) return acc
+      return Math.max(acc, Number.parseInt(match[1], 10))
+    }, 0) + 1
+  )
+}
+
+function getDefaultFilename(label) {
+  const fallback = 'mindmap'
+  if (!label || typeof label !== 'string') {
+    return `${fallback}.json`
+  }
+  const trimmed = label.trim()
+  if (trimmed.length === 0) {
+    return `${fallback}.json`
+  }
+  const normalized = trimmed
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9\-_]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  const safeName = normalized.length > 0 ? normalized : fallback
+  return `${safeName}.json`
+}
 
 function computeLayout(nodes) {
   const rootNode = nodes.find((node) => node.parentId === null)
@@ -119,7 +149,6 @@ function App() {
   const [draftLabel, setDraftLabel] = useState(INITIAL_NODES[0].label)
   const [customPositions, setCustomPositions] = useState({})
   const [draggingNodeId, setDraggingNodeId] = useState(null)
-  const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(false)
   const [nodeSizes, setNodeSizes] = useState({})
   const idCounter = useRef(nextIdFromInitial)
   const svgRef = useRef(null)
@@ -140,6 +169,7 @@ function App() {
 
   const dragStateRef = useRef(null)
   const measurementRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   useLayoutEffect(() => {
     if (typeof document === 'undefined') return
@@ -476,18 +506,6 @@ function App() {
     return { x: transformed.x, y: transformed.y }
   }, [])
 
-  const snapPosition = useCallback(
-    (x, y) => {
-      if (!isGridSnappingEnabled) {
-        return { x, y }
-      }
-      const snappedX = Math.round(x / GRID_SIZE) * GRID_SIZE
-      const snappedY = Math.round(y / GRID_SIZE) * GRID_SIZE
-      return { x: snappedX, y: snappedY }
-    },
-    [isGridSnappingEnabled],
-  )
-
   const handleNodePointerDown = useCallback(
     (event, node) => {
       event.stopPropagation()
@@ -536,10 +554,10 @@ function App() {
 
       const deltaX = svgPoint.x - dragState.startPointer.x
       const deltaY = svgPoint.y - dragState.startPointer.y
-      const nextPosition = snapPosition(
-        dragState.startPosition.x + deltaX,
-        dragState.startPosition.y + deltaY,
-      )
+      const nextPosition = {
+        x: dragState.startPosition.x + deltaX,
+        y: dragState.startPosition.y + deltaY,
+      }
 
       setCustomPositions((prev) => {
         const previous = prev[dragState.nodeId]
@@ -552,7 +570,7 @@ function App() {
         }
       })
     },
-    [convertPointerToSvgPoint, snapPosition],
+    [convertPointerToSvgPoint],
   )
 
   const endDragging = useCallback(() => {
@@ -603,10 +621,100 @@ function App() {
     })
   }, [nodes])
 
+  const handleSave = useCallback(() => {
+    const payload = {
+      nodes,
+      customPositions,
+      viewTransform,
+    }
+    const json = JSON.stringify(payload, null, 2)
+    const filename = getDefaultFilename(rootNode?.label)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }, [customPositions, nodes, rootNode?.label, viewTransform])
+
+  const handleLoadClick = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleFileChange = useCallback(
+    (event) => {
+      const input = event.target
+      const { files } = input
+      const file = files && files[0]
+      if (!file) return
+
+      const reader = new FileReader()
+      reader.onload = (loadEvent) => {
+        try {
+          const text = typeof loadEvent.target?.result === 'string' ? loadEvent.target.result : ''
+          const data = JSON.parse(text)
+          if (!data || typeof data !== 'object' || !Array.isArray(data.nodes)) {
+            throw new Error('Invalid data')
+          }
+
+          if (!window.confirm('Charger cette carte remplacera la carte actuelle. Continuer ?')) {
+            return
+          }
+
+          const nextNodes = data.nodes.map((node) => ({ ...node }))
+          const nextCustomPositions =
+            data.customPositions && typeof data.customPositions === 'object'
+              ? data.customPositions
+              : {}
+          const nextViewTransform =
+            data.viewTransform && typeof data.viewTransform === 'object'
+              ? {
+                  x: Number.isFinite(data.viewTransform.x) ? data.viewTransform.x : 0,
+                  y: Number.isFinite(data.viewTransform.y) ? data.viewTransform.y : 0,
+                  scale: Number.isFinite(data.viewTransform.scale) ? data.viewTransform.scale : 1,
+                }
+              : { x: 0, y: 0, scale: 1 }
+          setNodes(nextNodes)
+          setCustomPositions(nextCustomPositions)
+          setViewTransform(nextViewTransform)
+
+          const nextRoot = nextNodes.find((node) => node.parentId === null)
+          if (nextRoot) {
+            setSelectedId(nextRoot.id)
+          } else if (nextNodes.length > 0) {
+            setSelectedId(nextNodes[0].id)
+          }
+
+          idCounter.current = getNextIdFromNodes(nextNodes)
+        } catch (error) {
+          console.error('Failed to load mind map', error)
+          window.alert("Impossible de charger ce fichier. Veuillez vérifier son contenu.")
+        } finally {
+          if (input) {
+            input.value = ''
+          }
+        }
+      }
+
+      reader.onerror = () => {
+        window.alert('Une erreur est survenue lors de la lecture du fichier.')
+        if (input) {
+          input.value = ''
+        }
+      }
+
+      reader.readAsText(file)
+    },
+    [setCustomPositions, setNodes, setSelectedId, setViewTransform],
+  )
+
   return (
     <div className="app">
       <div
-        className={`canvas-wrapper ${isGridSnappingEnabled ? 'with-grid' : ''}`}
+        className="canvas-wrapper"
         onClick={handleCanvasClick}
       >
         <svg
@@ -753,16 +861,20 @@ function App() {
 
         <div className="canvas-overlay">
           <div className="overlay-panel">
-            <label className="grid-toggle">
+            <div className="overlay-actions">
+              <button type="button" className="overlay-button" onClick={handleSave} data-pan-stop="true">
+                Sauvegarder
+              </button>
+              <button type="button" className="overlay-button" onClick={handleLoadClick} data-pan-stop="true">
+                Charger
+              </button>
               <input
-                type="checkbox"
-                checked={isGridSnappingEnabled}
-                onChange={(event) => setIsGridSnappingEnabled(event.target.checked)}
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
               />
-              <span>Aligner sur la grille</span>
-            </label>
-            <div className="overlay-tip">
-              Cliquez sur un nœud pour le sélectionner, glissez-déposez pour le déplacer. Ctrl + Retour arrière pour supprimer.
             </div>
           </div>
         </div>
