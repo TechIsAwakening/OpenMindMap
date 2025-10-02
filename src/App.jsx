@@ -6,12 +6,48 @@ const MIN_NODE_WIDTH = 120
 const MIN_NODE_HEIGHT = 40
 const MAX_NODE_WIDTH = 420
 const PLACEHOLDER_LABEL = 'Nommez cette idée'
+const DEFAULT_NODE_COLOR = '#ffffff'
+const COLOR_PRESETS = Object.freeze([
+  '#ffffff',
+  '#fee2e2',
+  '#ffedd5',
+  '#fef3c7',
+  '#dcfce7',
+  '#ccfbf1',
+  '#e0f2fe',
+  '#ede9fe',
+])
 const DEFAULT_NODE_SIZE = Object.freeze({ width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT })
 
+function normalizeNodeColor(color) {
+  if (typeof color !== 'string') {
+    return DEFAULT_NODE_COLOR
+  }
+  const trimmed = color.trim().toLowerCase()
+  const shortHexMatch = trimmed.match(/^#([0-9a-f]{3})$/i)
+  if (shortHexMatch) {
+    const [r, g, b] = shortHexMatch[1]
+    return `#${r}${r}${g}${g}${b}${b}`
+  }
+  if (/^#([0-9a-f]{6})$/i.test(trimmed)) {
+    return trimmed
+  }
+  return DEFAULT_NODE_COLOR
+}
+
+function hexToRgb(color) {
+  const normalized = normalizeNodeColor(color)
+  const hex = normalized.slice(1)
+  const r = Number.parseInt(hex.slice(0, 2), 16)
+  const g = Number.parseInt(hex.slice(2, 4), 16)
+  const b = Number.parseInt(hex.slice(4, 6), 16)
+  return { r, g, b }
+}
+
 const INITIAL_NODES = [
-  { id: 'root', label: 'Open Mind Map', parentId: null },
-  { id: 'node-1', label: 'Idée clé #1', parentId: 'root' },
-  { id: 'node-2', label: 'Idée clé #2', parentId: 'root' },
+  { id: 'root', label: 'Open Mind Map', parentId: null, externalLink: '', color: DEFAULT_NODE_COLOR },
+  { id: 'node-1', label: 'Idée clé #1', parentId: 'root', externalLink: '', color: DEFAULT_NODE_COLOR },
+  { id: 'node-2', label: 'Idée clé #2', parentId: 'root', externalLink: '', color: DEFAULT_NODE_COLOR },
 ]
 
 const nextIdFromInitial =
@@ -301,26 +337,43 @@ function App() {
     return node ?? rootNode
   }, [nodes, selectedId, rootNode])
 
+  const [draftExternalLink, setDraftExternalLink] = useState('')
+  const [draftColor, setDraftColor] = useState(DEFAULT_NODE_COLOR)
+  const [configInitialColor, setConfigInitialColor] = useState(DEFAULT_NODE_COLOR)
+
   useEffect(() => {
     if (selectedNode) {
-      setDraftLabel(selectedNode.label)
+      setDraftLabel(selectedNode.label ?? '')
+      setDraftExternalLink(selectedNode.externalLink ?? '')
+      const normalizedColor = normalizeNodeColor(selectedNode.color ?? DEFAULT_NODE_COLOR)
+      setDraftColor(normalizedColor)
+      setConfigInitialColor(normalizedColor)
     } else {
       setDraftLabel('')
+      setDraftExternalLink('')
+      setDraftColor(DEFAULT_NODE_COLOR)
+      setConfigInitialColor(DEFAULT_NODE_COLOR)
     }
   }, [selectedNode])
 
-  const applyNodeLabel = useCallback(
-    (label) => {
+  const applyNodeConfig = useCallback(
+    ({ label, externalLink, color }) => {
       if (!selectedNode) return
       setNodes((prev) =>
-        prev.map((node) =>
-          node.id === selectedNode.id
-            ? {
-                ...node,
-                label,
-              }
-            : node,
-        ),
+        prev.map((node) => {
+          if (node.id !== selectedNode.id) {
+            return node
+          }
+          const nextLabel = typeof label === 'string' ? label : node.label
+          const nextLink = typeof externalLink === 'string' ? externalLink.trim() : node.externalLink ?? ''
+          const nextColor = normalizeNodeColor(color ?? node.color ?? DEFAULT_NODE_COLOR)
+          return {
+            ...node,
+            label: nextLabel,
+            externalLink: nextLink,
+            color: nextColor,
+          }
+        }),
       )
     },
     [selectedNode],
@@ -333,6 +386,8 @@ function App() {
       id: `node-${idCounter.current}`,
       label: '',
       parentId: selectedNode.id,
+      externalLink: '',
+      color: DEFAULT_NODE_COLOR,
     }
 
     idCounter.current += 1
@@ -364,7 +419,11 @@ function App() {
 
   const openConfigPanel = useCallback(() => {
     if (!selectedNode) return
+    const normalizedColor = normalizeNodeColor(selectedNode.color ?? DEFAULT_NODE_COLOR)
     setDraftLabel(selectedNode.label)
+    setDraftExternalLink(selectedNode.externalLink ?? '')
+    setDraftColor(normalizedColor)
+    setConfigInitialColor(normalizedColor)
     setIsConfigOpen(true)
   }, [selectedNode])
 
@@ -384,12 +443,29 @@ function App() {
 
       if (data.type === 'config-save') {
         const label = typeof data.payload?.label === 'string' ? data.payload.label : ''
+        const externalLink = typeof data.payload?.externalLink === 'string' ? data.payload.externalLink : ''
+        const color = typeof data.payload?.color === 'string' ? data.payload.color : DEFAULT_NODE_COLOR
+        const normalizedColor = normalizeNodeColor(color)
         setDraftLabel(label)
-        applyNodeLabel(label)
+        setDraftExternalLink(externalLink)
+        setDraftColor(normalizedColor)
+        setConfigInitialColor(normalizedColor)
+        applyNodeConfig({ label, externalLink, color: normalizedColor })
         closeConfigPanel()
       }
 
+      if (data.type === 'config-color-change') {
+        const color = typeof data.payload?.color === 'string' ? data.payload.color : DEFAULT_NODE_COLOR
+        const normalizedColor = normalizeNodeColor(color)
+        setDraftColor(normalizedColor)
+      }
+
       if (data.type === 'config-cancel') {
+        if (selectedNode) {
+          const normalizedColor = normalizeNodeColor(selectedNode.color ?? DEFAULT_NODE_COLOR)
+          setDraftColor(normalizedColor)
+          setConfigInitialColor(normalizedColor)
+        }
         closeConfigPanel()
       }
     }
@@ -398,10 +474,19 @@ function App() {
     return () => {
       window.removeEventListener('message', handleMessage)
     }
-  }, [applyNodeLabel, closeConfigPanel, isConfigOpen])
+  }, [applyNodeConfig, closeConfigPanel, isConfigOpen, selectedNode])
 
   const configIframeContent = useMemo(() => {
-    const initialData = { label: draftLabel ?? '' }
+    const initialData = {
+      label: draftLabel ?? '',
+      externalLink: draftExternalLink ?? '',
+      color: configInitialColor,
+    }
+
+    const colorOptionsMarkup = COLOR_PRESETS.map(
+      (color) =>
+        `<button type="button" class="color-swatch" data-color-value="${color}" style="--swatch-color: ${color}" aria-label="Choisir la couleur ${color}" aria-pressed="false"></button>`,
+    ).join('')
 
     return `<!DOCTYPE html>
 <html lang="fr">
@@ -441,15 +526,20 @@ function App() {
         color: rgba(15, 23, 42, 0.6);
         font-size: 0.9rem;
       }
-      label {
+      .field-group {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .field-group label,
+      .field-label {
         font-weight: 600;
         font-size: 0.95rem;
         color: rgba(15, 23, 42, 0.85);
       }
-      textarea {
+      textarea,
+      input[type='url'] {
         width: 100%;
-        min-height: 180px;
-        resize: vertical;
         border-radius: 18px;
         border: 1px solid rgba(148, 163, 184, 0.4);
         padding: 14px 16px;
@@ -457,8 +547,14 @@ function App() {
         color: inherit;
         background: rgba(241, 245, 249, 0.6);
         box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+        transition: background 0.2s ease, border 0.2s ease;
       }
-      textarea:focus {
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+      }
+      textarea:focus,
+      input[type='url']:focus {
         outline: 3px solid rgba(59, 130, 246, 0.35);
         background: #ffffff;
       }
@@ -493,16 +589,109 @@ function App() {
         transform: translateY(-1px);
         box-shadow: 0 16px 30px rgba(34, 197, 94, 0.3);
       }
+      .color-picker {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+      .color-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        padding: 10px 16px;
+        background: rgba(148, 163, 184, 0.15);
+        color: rgba(15, 23, 42, 0.85);
+        font-weight: 600;
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: background 0.2s ease, border 0.2s ease, transform 0.15s ease;
+      }
+      .color-button:hover,
+      .color-picker.is-open .color-button {
+        background: rgba(148, 163, 184, 0.25);
+        border-color: rgba(148, 163, 184, 0.55);
+      }
+      .color-preview {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: 2px solid rgba(15, 23, 42, 0.15);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+      }
+      .color-grid {
+        position: absolute;
+        top: calc(100% + 10px);
+        left: 0;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        padding: 14px;
+        border-radius: 18px;
+        background: #ffffff;
+        box-shadow: 0 18px 35px rgba(15, 23, 42, 0.18);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(6px);
+        transition: opacity 0.15s ease, transform 0.15s ease;
+        z-index: 10;
+      }
+      .color-picker.is-open .color-grid {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+      }
+      .color-swatch {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        background: var(--swatch-color);
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border 0.15s ease;
+      }
+      .color-swatch:hover {
+        transform: translateY(-1px) scale(1.05);
+        box-shadow: 0 10px 18px rgba(15, 23, 42, 0.18);
+      }
+      .color-swatch.is-active {
+        border-color: rgba(15, 23, 42, 0.65);
+        box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.15);
+      }
+      .color-swatch:focus-visible {
+        outline: 3px solid rgba(59, 130, 246, 0.35);
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>
     <div class="config-root">
       <div class="config-header">
         <h1>Configuration du nœud</h1>
-        <p>Modifiez le contenu du nœud et préparez l'espace pour de futurs réglages.</p>
+        <p>Modifiez le contenu du nœud et personnalisez-le visuellement.</p>
       </div>
-      <label for="node-label">Contenu du nœud</label>
-      <textarea id="node-label" placeholder="${PLACEHOLDER_LABEL}"></textarea>
+      <div class="field-group">
+        <label for="node-label">Contenu du nœud</label>
+        <textarea id="node-label" placeholder="${PLACEHOLDER_LABEL}"></textarea>
+      </div>
+      <div class="field-group">
+        <label for="node-link">Lien externe</label>
+        <input type="url" id="node-link" placeholder="https://exemple.com" />
+      </div>
+      <div class="field-group">
+        <span class="field-label">Couleur</span>
+        <div class="color-picker" id="color-picker">
+          <button type="button" class="color-button" id="color-button" aria-haspopup="true" aria-expanded="false" aria-controls="color-palette">
+            <span class="color-preview" id="color-preview" aria-hidden="true"></span>
+            <span>Couleur</span>
+          </button>
+          <div class="color-grid" id="color-palette" role="listbox">
+            ${colorOptionsMarkup}
+          </div>
+        </div>
+      </div>
       <div class="config-actions">
         <button type="button" id="cancel">Annuler</button>
         <button type="button" id="save">Sauvegarder</button>
@@ -510,32 +699,129 @@ function App() {
     </div>
     <script>
       ;(function () {
+        const DEFAULT_COLOR = '${DEFAULT_NODE_COLOR}'
         const initialData = ${JSON.stringify(initialData)}
         const textarea = document.getElementById('node-label')
+        const linkInput = document.getElementById('node-link')
+        const colorPicker = document.getElementById('color-picker')
+        const colorButton = document.getElementById('color-button')
+        const colorPalette = document.getElementById('color-palette')
+        const colorPreview = document.getElementById('color-preview')
+        const colorOptions = Array.from(colorPalette.querySelectorAll('[data-color-value]'))
         const send = (type, payload) => {
           parent.postMessage({ source: 'openmindmap-config', type, payload }, '*')
         }
+
+        const normalizeHex = (value) => {
+          if (typeof value !== 'string') return DEFAULT_COLOR
+          const trimmed = value.trim().toLowerCase()
+          const shortMatch = trimmed.match(/^#([0-9a-f]{3})$/)
+          if (shortMatch) {
+            const [r, g, b] = shortMatch[1]
+            return '#' + r + r + g + g + b + b
+          }
+          if (/^#[0-9a-f]{6}$/.test(trimmed)) {
+            return trimmed
+          }
+          return DEFAULT_COLOR
+        }
+
+        const setActiveColor = (nextColor, notify = true) => {
+          const normalized = normalizeHex(nextColor)
+          currentColor = normalized
+          colorPreview.style.background = normalized
+          colorOptions.forEach((option) => {
+            const optionColor = normalizeHex(option.getAttribute('data-color-value') || '')
+            const isActive = optionColor === normalized
+            option.classList.toggle('is-active', isActive)
+            option.setAttribute('aria-pressed', isActive ? 'true' : 'false')
+          })
+          if (notify) {
+            send('config-color-change', { color: normalized })
+          }
+        }
+
+        const closePalette = () => {
+          colorPicker.classList.remove('is-open')
+          colorButton.setAttribute('aria-expanded', 'false')
+        }
+
         textarea.value = initialData.label || ''
+        if (linkInput) {
+          linkInput.value = initialData.externalLink || ''
+        }
+
         textarea.focus()
         textarea.setSelectionRange(textarea.value.length, textarea.value.length)
-        const handleSave = () => send('config-save', { label: textarea.value })
-        document.getElementById('cancel').addEventListener('click', () => send('config-cancel'))
+
+        let currentColor = normalizeHex(initialData.color || DEFAULT_COLOR)
+        setActiveColor(currentColor, false)
+
+        colorButton.addEventListener('click', (event) => {
+          event.preventDefault()
+          const isOpen = colorPicker.classList.toggle('is-open')
+          colorButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false')
+        })
+
+        document.addEventListener('click', (event) => {
+          if (!colorPicker.contains(event.target)) {
+            closePalette()
+          }
+        })
+
+        colorOptions.forEach((option) => {
+          option.addEventListener('click', (event) => {
+            event.preventDefault()
+            const value = option.getAttribute('data-color-value')
+            if (!value) return
+            setActiveColor(value)
+            closePalette()
+          })
+          option.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              option.click()
+            }
+          })
+        })
+
+        const handleSave = () =>
+          send('config-save', {
+            label: textarea.value,
+            externalLink: linkInput ? linkInput.value : '',
+            color: currentColor,
+          })
+
+        document.getElementById('cancel').addEventListener('click', () => {
+          closePalette()
+          send('config-cancel')
+        })
         document.getElementById('save').addEventListener('click', handleSave)
-        textarea.addEventListener('keydown', (event) => {
+
+        const handleKeyDown = (event) => {
           if (event.key === 'Escape') {
             event.preventDefault()
+            if (colorPicker.classList.contains('is-open')) {
+              closePalette()
+              return
+            }
             send('config-cancel')
           }
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'enter') {
             event.preventDefault()
             handleSave()
           }
-        })
+        }
+
+        textarea.addEventListener('keydown', handleKeyDown)
+        if (linkInput) {
+          linkInput.addEventListener('keydown', handleKeyDown)
+        }
       })()
     </script>
   </body>
 </html>`
-  }, [draftLabel])
+  }, [configInitialColor, draftExternalLink, draftLabel])
 
   const handleCanvasClick = useCallback(() => {
     if (panStateRef.current.moved) {
@@ -969,7 +1255,8 @@ function App() {
           pdf.setGState(pdf.GState({ opacity: 1 }))
         }
 
-        pdf.setFillColor(255, 255, 255)
+        const { r, g, b } = hexToRgb(node.color ?? DEFAULT_NODE_COLOR)
+        pdf.setFillColor(r, g, b)
         pdf.setDrawColor(0, 0, 0)
         pdf.setLineWidth(5 * scale)
         pdf.roundedRect(nodeX, nodeY, nodeWidth, nodeHeight, cornerRadius, cornerRadius, 'FD')
@@ -1032,7 +1319,17 @@ function App() {
             return
           }
 
-          const nextNodes = data.nodes.map((node) => ({ ...node }))
+          const nextNodes = data.nodes.map((node) => {
+            const label = typeof node.label === 'string' ? node.label : ''
+            const externalLink = typeof node.externalLink === 'string' ? node.externalLink.trim() : ''
+            const color = normalizeNodeColor(node.color ?? DEFAULT_NODE_COLOR)
+            return {
+              ...node,
+              label,
+              externalLink,
+              color,
+            }
+          })
           const nextCustomPositions =
             data.customPositions && typeof data.customPositions === 'object'
               ? data.customPositions
@@ -1131,6 +1428,19 @@ function App() {
                 const displayLabel = node.label.trim().length > 0 ? node.label : PLACEHOLDER_LABEL
                 const size = nodeSizes[node.id] ?? DEFAULT_NODE_SIZE
                 const toolbarWidth = Math.max(size.width, 280)
+                const baseColor = node.color ?? DEFAULT_NODE_COLOR
+                const effectiveColor =
+                  isSelected && isConfigOpen ? draftColor ?? baseColor : baseColor
+                const normalizedColor = normalizeNodeColor(effectiveColor)
+                const rawLink = typeof node.externalLink === 'string' ? node.externalLink.trim() : ''
+                const hasExternalLink = rawLink.length > 0
+                const labelClassNames = [
+                  'node-label',
+                  displayLabel === node.label ? '' : 'is-placeholder',
+                  hasExternalLink ? 'node-label-link' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')
 
                 return (
                   <g
@@ -1196,10 +1506,20 @@ function App() {
                         className={`mindmap-node-card ${isSelected ? 'is-selected' : ''} ${isRoot ? 'is-root' : ''}`}
                         data-pan-stop="true"
                         xmlns="http://www.w3.org/1999/xhtml"
+                        style={{ background: normalizedColor }}
                       >
-                        <span className={`node-label ${displayLabel === node.label ? '' : 'is-placeholder'}`}>
-                          {displayLabel}
-                        </span>
+                        {hasExternalLink ? (
+                          <a
+                            href={rawLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={labelClassNames}
+                          >
+                            {displayLabel}
+                          </a>
+                        ) : (
+                          <span className={labelClassNames}>{displayLabel}</span>
+                        )}
                       </div>
                     </foreignObject>
 
