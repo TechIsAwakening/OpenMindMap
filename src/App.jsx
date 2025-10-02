@@ -12,12 +12,44 @@ const INITIAL_NODES = [
   { id: 'node-2', label: 'Idée clé #2', parentId: 'root' },
 ]
 
-const nextIdFromInitial =
-  INITIAL_NODES.reduce((acc, node) => {
-    const match = node.id.match(/node-(\d+)/)
-    if (!match) return acc
-    return Math.max(acc, Number.parseInt(match[1], 10))
-  }, 0) + 1
+const STORAGE_KEY = 'openmindmap:saved-state'
+const AUTOSAVE_INTERVAL_MS = 5000
+
+function createDefaultNodes() {
+  return INITIAL_NODES.map((node) => ({ ...node }))
+}
+
+function computeNextIdFromNodes(nodes) {
+  return (
+    (nodes ?? []).reduce((acc, node) => {
+      const match = node.id.match(/node-(\d+)/)
+      if (!match) return acc
+      return Math.max(acc, Number.parseInt(match[1], 10))
+    }, 0) + 1
+  )
+}
+
+function readStoredState() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') {
+      return null
+    }
+    if (!Array.isArray(parsed.nodes)) {
+      return null
+    }
+    return parsed
+  } catch (error) {
+    console.error('Impossible de charger la sauvegarde locale', error)
+    return null
+  }
+}
 
 function computeLayout(nodes) {
   const rootNode = nodes.find((node) => node.parentId === null)
@@ -111,25 +143,54 @@ function IconTrash() {
 }
 
 function App() {
-  const [nodes, setNodes] = useState(INITIAL_NODES)
-  const [selectedId, setSelectedId] = useState('root')
-  const [draftLabel, setDraftLabel] = useState(INITIAL_NODES[0].label)
-  const [customPositions, setCustomPositions] = useState({})
+  const storedStateRef = useRef(readStoredState())
+
+  const [nodes, setNodes] = useState(() => storedStateRef.current?.nodes ?? createDefaultNodes())
+  const [selectedId, setSelectedId] = useState(() => {
+    const nodesData = storedStateRef.current?.nodes ?? createDefaultNodes()
+    const storedSelected = storedStateRef.current?.selectedId
+    if (storedSelected && nodesData.some((node) => node.id === storedSelected)) {
+      return storedSelected
+    }
+    const root = nodesData.find((node) => node.parentId === null)
+    return root?.id ?? nodesData[0]?.id ?? 'root'
+  })
+  const [draftLabel, setDraftLabel] = useState(() => {
+    const nodesData = storedStateRef.current?.nodes ?? createDefaultNodes()
+    const selectedNodeId = storedStateRef.current?.selectedId
+    const selectedNode = nodesData.find((node) => node.id === selectedNodeId)
+    if (selectedNode) {
+      return selectedNode.label
+    }
+    const root = nodesData.find((node) => node.parentId === null)
+    return root?.label ?? nodesData[0]?.label ?? ''
+  })
+  const [customPositions, setCustomPositions] = useState(
+    () => storedStateRef.current?.customPositions ?? {},
+  )
   const [draggingNodeId, setDraggingNodeId] = useState(null)
-  const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(false)
-  const idCounter = useRef(nextIdFromInitial)
+  const [isGridSnappingEnabled, setIsGridSnappingEnabled] = useState(
+    () => storedStateRef.current?.isGridSnappingEnabled ?? false,
+  )
+  const [viewTransform, setViewTransform] = useState(
+    () =>
+      storedStateRef.current?.viewTransform ?? {
+        x: 0,
+        y: 0,
+        scale: 1,
+      },
+  )
+  const [lastSavedAt, setLastSavedAt] = useState(() => storedStateRef.current?.lastSavedAt ?? null)
+  const idCounter = useRef(
+    storedStateRef.current?.idCounter ??
+      computeNextIdFromNodes(storedStateRef.current?.nodes ?? createDefaultNodes()),
+  )
   const svgRef = useRef(null)
   const panStateRef = useRef({
     isPanning: false,
     pointerId: null,
     last: { x: 0, y: 0 },
     moved: false,
-  })
-
-  const [viewTransform, setViewTransform] = useState({
-    x: 0,
-    y: 0,
-    scale: 1,
   })
 
   const [isPanning, setIsPanning] = useState(false)
@@ -141,6 +202,13 @@ function App() {
     () => nodes.find((node) => node.parentId === null) ?? null,
     [nodes],
   )
+
+  useEffect(() => {
+    const nextFromNodes = computeNextIdFromNodes(nodes)
+    if (idCounter.current < nextFromNodes) {
+      idCounter.current = nextFromNodes
+    }
+  }, [nodes])
 
   useEffect(() => {
     if (!rootNode) return
@@ -169,6 +237,90 @@ function App() {
     const node = nodes.find((item) => item.id === selectedId)
     return node ?? rootNode
   }, [nodes, selectedId, rootNode])
+
+  const saveState = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const payload = {
+      nodes,
+      customPositions,
+      viewTransform,
+      isGridSnappingEnabled,
+      selectedId: selectedNode?.id ?? null,
+      idCounter: idCounter.current,
+      lastSavedAt: new Date().toISOString(),
+    }
+
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+      setLastSavedAt(payload.lastSavedAt)
+    } catch (error) {
+      console.error("Impossible d'enregistrer la sauvegarde locale", error)
+    }
+  }, [customPositions, isGridSnappingEnabled, nodes, selectedNode?.id, viewTransform])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+    const interval = window.setInterval(() => {
+      saveState()
+    }, AUTOSAVE_INTERVAL_MS)
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [saveState])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+    const handleBeforeUnload = () => {
+      saveState()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [saveState])
+
+  const handleReset = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(STORAGE_KEY)
+      } catch (error) {
+        console.error('Impossible de supprimer la sauvegarde locale', error)
+      }
+    }
+
+    const freshNodes = createDefaultNodes()
+    const freshRoot = freshNodes.find((node) => node.parentId === null)
+    const nextSelectedId = freshRoot?.id ?? freshNodes[0]?.id ?? 'root'
+
+    setNodes(freshNodes)
+    setSelectedId(nextSelectedId)
+    setDraftLabel(freshRoot?.label ?? freshNodes[0]?.label ?? '')
+    setCustomPositions({})
+    setViewTransform({ x: 0, y: 0, scale: 1 })
+    setIsGridSnappingEnabled(false)
+    setLastSavedAt(null)
+    idCounter.current = computeNextIdFromNodes(freshNodes)
+  }, [])
+
+  const formattedLastSavedAt = useMemo(() => {
+    if (!lastSavedAt) return null
+    const parsed = new Date(lastSavedAt)
+    if (Number.isNaN(parsed.getTime())) {
+      return null
+    }
+    return parsed.toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  }, [lastSavedAt])
 
   useEffect(() => {
     if (selectedNode) {
@@ -675,6 +827,23 @@ function App() {
               />
               <span>Aligner sur la grille</span>
             </label>
+            <div className="overlay-actions">
+              <button type="button" className="overlay-button overlay-button--primary" onClick={saveState}>
+                <span aria-hidden="true">💾</span>
+                <span>Sauvegarder</span>
+              </button>
+              <button type="button" className="overlay-button overlay-button--danger" onClick={handleReset}>
+                <span aria-hidden="true">🗑️</span>
+                <span>Réinitialiser</span>
+              </button>
+            </div>
+            <div className="autosave-info">
+              {formattedLastSavedAt ? (
+                <span>Dernière sauvegarde : {formattedLastSavedAt}</span>
+              ) : (
+                <span>Aucune sauvegarde locale</span>
+              )}
+            </div>
             <div className="overlay-tip">
               Cliquez sur un nœud pour le sélectionner, glissez-déposez pour le déplacer. Ctrl + Retour arrière pour supprimer.
             </div>
