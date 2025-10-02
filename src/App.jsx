@@ -11,9 +11,6 @@ const INITIAL_NODES = [
   { id: 'node-2', label: 'Idée clé #2', parentId: 'root' },
 ]
 
-const STORAGE_KEY = 'openmindmap:saved-state'
-const AUTOSAVE_INTERVAL_MS = 5000
-
 function createDefaultNodes() {
   return INITIAL_NODES.map((node) => ({ ...node }))
 }
@@ -26,28 +23,6 @@ function computeNextIdFromNodes(nodes) {
       return Math.max(acc, Number.parseInt(match[1], 10))
     }, 0) + 1
   )
-}
-
-function readStoredState() {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') {
-      return null
-    }
-    if (!Array.isArray(parsed.nodes)) {
-      return null
-    }
-    return parsed
-  } catch (error) {
-    console.error('Impossible de charger la sauvegarde locale', error)
-    return null
-  }
 }
 
 function computeLayout(nodes) {
@@ -142,45 +117,28 @@ function IconTrash() {
 }
 
 function App() {
-  const storedStateRef = useRef(readStoredState())
-
-  const [nodes, setNodes] = useState(() => storedStateRef.current?.nodes ?? createDefaultNodes())
+  const [nodes, setNodes] = useState(() => createDefaultNodes())
   const [selectedId, setSelectedId] = useState(() => {
-    const nodesData = storedStateRef.current?.nodes ?? createDefaultNodes()
-    const storedSelected = storedStateRef.current?.selectedId
-    if (storedSelected && nodesData.some((node) => node.id === storedSelected)) {
-      return storedSelected
-    }
+    const nodesData = createDefaultNodes()
     const root = nodesData.find((node) => node.parentId === null)
     return root?.id ?? nodesData[0]?.id ?? 'root'
   })
   const [draftLabel, setDraftLabel] = useState(() => {
-    const nodesData = storedStateRef.current?.nodes ?? createDefaultNodes()
-    const selectedNodeId = storedStateRef.current?.selectedId
-    const selectedNode = nodesData.find((node) => node.id === selectedNodeId)
-    if (selectedNode) {
-      return selectedNode.label
-    }
+    const nodesData = createDefaultNodes()
     const root = nodesData.find((node) => node.parentId === null)
     return root?.label ?? nodesData[0]?.label ?? ''
   })
-  const [customPositions, setCustomPositions] = useState(
-    () => storedStateRef.current?.customPositions ?? {},
-  )
+  const [customPositions, setCustomPositions] = useState({})
   const [draggingNodeId, setDraggingNodeId] = useState(null)
   const [viewTransform, setViewTransform] = useState(
-    () =>
-      storedStateRef.current?.viewTransform ?? {
-        x: 0,
-        y: 0,
-        scale: 1,
-      },
+    () => ({
+      x: 0,
+      y: 0,
+      scale: 1,
+    }),
   )
-  const [lastSavedAt, setLastSavedAt] = useState(() => storedStateRef.current?.lastSavedAt ?? null)
-  const idCounter = useRef(
-    storedStateRef.current?.idCounter ??
-      computeNextIdFromNodes(storedStateRef.current?.nodes ?? createDefaultNodes()),
-  )
+  const [lastSavedAt, setLastSavedAt] = useState(null)
+  const idCounter = useRef(computeNextIdFromNodes(createDefaultNodes()))
   const svgRef = useRef(null)
   const panStateRef = useRef({
     isPanning: false,
@@ -254,23 +212,6 @@ function App() {
     setViewTransform(nextViewTransform)
     setLastSavedAt(persistedAt)
     idCounter.current = nextIdCounter
-
-    if (typeof window !== 'undefined') {
-      const payload = {
-        nodes: nextNodes,
-        customPositions: nextCustomPositions,
-        viewTransform: nextViewTransform,
-        selectedId: fallbackSelectedId,
-        idCounter: nextIdCounter,
-        lastSavedAt: persistedAt,
-      }
-
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
-      } catch (error) {
-        console.error("Impossible d'enregistrer la sauvegarde importée", error)
-      }
-    }
   }, [])
 
 
@@ -314,75 +255,39 @@ function App() {
     return node ?? rootNode
   }, [nodes, selectedId, rootNode])
 
-  const saveState = useCallback(() => {
+  const handleExportToFile = useCallback(() => {
     if (typeof window === 'undefined') {
       return
     }
 
+    const timestamp = new Date()
     const payload = {
       nodes,
       customPositions,
       viewTransform,
       selectedId: selectedNode?.id ?? null,
       idCounter: idCounter.current,
-      lastSavedAt: new Date().toISOString(),
+      lastSavedAt: timestamp.toISOString(),
     }
 
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const formattedTimestamp = payload.lastSavedAt.replace(/[:.]/g, '-')
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `openmindmap-${formattedTimestamp}.json`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
       setLastSavedAt(payload.lastSavedAt)
     } catch (error) {
-      console.error("Impossible d'enregistrer la sauvegarde locale", error)
+      console.error("Impossible d'exporter la carte mentale", error)
     }
   }, [customPositions, nodes, selectedNode?.id, viewTransform])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined
-    }
-    const interval = window.setInterval(() => {
-      saveState()
-    }, AUTOSAVE_INTERVAL_MS)
-    return () => {
-      window.clearInterval(interval)
-    }
-  }, [saveState])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined
-    }
-    const handleBeforeUnload = () => {
-      saveState()
-    }
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
-  }, [saveState])
-
-  const handleReset = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.removeItem(STORAGE_KEY)
-      } catch (error) {
-        console.error('Impossible de supprimer la sauvegarde locale', error)
-      }
-    }
-
-    const freshNodes = createDefaultNodes()
-    const freshRoot = freshNodes.find((node) => node.parentId === null)
-    const nextSelectedId = freshRoot?.id ?? freshNodes[0]?.id ?? 'root'
-
-    setNodes(freshNodes)
-    setSelectedId(nextSelectedId)
-    setDraftLabel(freshRoot?.label ?? freshNodes[0]?.label ?? '')
-    setCustomPositions({})
-    setViewTransform({ x: 0, y: 0, scale: 1 })
-    setIsGridSnappingEnabled(false)
-    setLastSavedAt(null)
-    idCounter.current = computeNextIdFromNodes(freshNodes)
-  }, [])
 
   const handleTriggerFilePicker = useCallback(() => {
     fileInputRef.current?.click()
@@ -918,7 +823,11 @@ function App() {
         <div className="canvas-overlay" data-pan-stop="true">
           <div className="overlay-panel">
             <div className="overlay-actions">
-              <button type="button" className="overlay-button overlay-button--primary" onClick={saveState}>
+              <button
+                type="button"
+                className="overlay-button overlay-button--primary"
+                onClick={handleExportToFile}
+              >
                 <span aria-hidden="true">💾</span>
                 <span>Sauvegarder</span>
               </button>
@@ -930,10 +839,6 @@ function App() {
                 <span aria-hidden="true">📂</span>
                 <span>Charger</span>
               </button>
-              <button type="button" className="overlay-button overlay-button--danger" onClick={handleReset}>
-                <span aria-hidden="true">🗑️</span>
-                <span>Réinitialiser</span>
-              </button>
             </div>
             <input
               ref={fileInputRef}
@@ -942,11 +847,11 @@ function App() {
               onChange={handleImportFromFile}
               style={{ display: 'none' }}
             />
-            <div className="autosave-info">
+            <div className="save-status">
               {formattedLastSavedAt ? (
                 <span>Dernière sauvegarde : {formattedLastSavedAt}</span>
               ) : (
-                <span>Aucune sauvegarde locale</span>
+                <span>Aucune sauvegarde effectuée</span>
               )}
             </div>
           </div>

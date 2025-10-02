@@ -246,16 +246,7 @@
   background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
 }
 
-.overlay-button--danger {
-  background: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
-  color: white;
-}
-
-.overlay-button--danger:hover {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-}
-
-.autosave-info {
+.save-status {
   background: rgba(15, 23, 42, 0.72);
   color: white;
   padding: 10px 16px;
